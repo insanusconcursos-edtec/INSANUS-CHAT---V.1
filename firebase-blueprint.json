@@ -1,0 +1,79 @@
+{
+  "entities": {
+    "Setor": {
+      "title": "Setor",
+      "description": "Setor de atendimento da empresa",
+      "type": "object",
+      "properties": {
+        "nome": { "type": "string", "description": "Nome do setor (ex: Comercial, Financeiro)" }
+      },
+      "required": ["nome"]
+    },
+    "Usuario": {
+      "title": "Usuario",
+      "description": "Usuário do sistema (admin ou agente)",
+      "type": "object",
+      "properties": {
+        "nome": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "papel": { "type": "string", "enum": ["admin", "agente"] },
+        "setorId": { "type": "string" },
+        "status": { "type": "string", "enum": ["online", "offline"] }
+      },
+      "required": ["nome", "email", "papel", "status"]
+    },
+    "Chat": {
+      "title": "Chat",
+      "description": "Conversa com um cliente",
+      "type": "object",
+      "properties": {
+        "clienteNome": { "type": "string" },
+        "clienteTelefone": { "type": "string" },
+        "canal": { "type": "string", "enum": ["whatsapp", "instagram", "messenger", "site"] },
+        "statusEtapa": { "type": "string", "enum": ["novo", "negociacao", "aguardando_retorno", "fechado", "pos_venda"] },
+        "atendenteId": { "type": "string" },
+        "setorId": { "type": "string" },
+        "dataUltimaMensagem": { "type": "string", "format": "date-time" },
+        "semRespostaDesde": { "type": "string", "format": "date-time" },
+        "origem": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["clienteNome", "canal", "statusEtapa", "setorId", "dataUltimaMensagem"]
+    },
+    "Mensagem": {
+      "title": "Mensagem",
+      "description": "Mensagem individual em um chat",
+      "type": "object",
+      "properties": {
+        "chatId": { "type": "string" },
+        "remetente": { "type": "string", "enum": ["cliente", "agente", "ia", "sistema"] },
+        "texto": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["chatId", "remetente", "texto", "timestamp"]
+    },
+    "Lembrete": {
+      "title": "Lembrete",
+      "description": "Lembrete para o atendente",
+      "type": "object",
+      "properties": {
+        "chatId": { "type": "string" },
+        "atendenteId": { "type": "string" },
+        "clienteNome": { "type": "string" },
+        "descricao": { "type": "string" },
+        "dataHora": { "type": "string", "format": "date-time" },
+        "prioridade": { "type": "string", "enum": ["urgente", "atencao", "normal"] },
+        "status": { "type": "string", "enum": ["pendente", "concluido", "atrasado"] },
+        "configuracaoAntecedencia": { "type": "string", "enum": ["5m", "30m", "1h", "1d"] }
+      },
+      "required": ["chatId", "atendenteId", "descricao", "dataHora", "prioridade", "status"]
+    }
+  },
+  "firestore": {
+    "/setores": { "schema": "Setor", "description": "Setores de atendimento" },
+    "/usuarios": { "schema": "Usuario", "description": "Usuários do sistema" },
+    "/chats": { "schema": "Chat", "description": "Conversas com clientes" },
+    "/chats/{chatId}/mensagens": { "schema": "Mensagem", "description": "Mensagens de um chat específico" },
+    "/lembretes": { "schema": "Lembrete", "description": "Lembretes de atendimento" }
+  }
+}

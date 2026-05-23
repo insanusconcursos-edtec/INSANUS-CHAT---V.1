@@ -1,0 +1,6 @@
+{
+  "name": "OmniChannel CRM & Atendimento",
+  "description": "Plataforma Omnichannel de Atendimento e CRM com suporte a múltiplos setores, usuários e gerenciamento de funil de vendas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
