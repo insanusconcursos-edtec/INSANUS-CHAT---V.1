@@ -7,13 +7,20 @@ import { initializeApp } from "firebase/app";
 import { getFirestore, enableIndexedDbPersistence } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 
+const getEnv = (key: string): string => {
+  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) {
+    return import.meta.env[key] as string;
+  }
+  return (process.env[key] as string) || '';
+};
+
 const firebaseConfig = {
-  apiKey: (import.meta.env?.VITE_FIREBASE_API_KEY as string) || "AIzaSyDk6VzstwLEvhzcdYFTgdQOX6xbBp4Jd4w",
-  authDomain: (import.meta.env?.VITE_FIREBASE_AUTH_DOMAIN as string) || "insanus-chat.firebaseapp.com",
-  projectId: (import.meta.env?.VITE_FIREBASE_PROJECT_ID as string) || "insanus-chat",
-  storageBucket: (import.meta.env?.VITE_FIREBASE_STORAGE_BUCKET as string) || "insanus-chat.firebasestorage.app",
-  messagingSenderId: (import.meta.env?.VITE_FIREBASE_MESSAGING_SENDER_ID as string) || "851708850498",
-  appId: (import.meta.env?.VITE_FIREBASE_APP_ID as string) || "1:851708850498:web:f3be581f1fbde52e2f18db"
+  apiKey: getEnv('VITE_FIREBASE_API_KEY') || "AIzaSyDk6VzstwLEvhzcdYFTgdQOX6xbBp4Jd4w",
+  authDomain: getEnv('VITE_FIREBASE_AUTH_DOMAIN') || "insanus-chat.firebaseapp.com",
+  projectId: getEnv('VITE_FIREBASE_PROJECT_ID') || "insanus-chat",
+  storageBucket: getEnv('VITE_FIREBASE_STORAGE_BUCKET') || "insanus-chat.firebasestorage.app",
+  messagingSenderId: getEnv('VITE_FIREBASE_MESSAGING_SENDER_ID') || "851708850498",
+  appId: getEnv('VITE_FIREBASE_APP_ID') || "1:851708850498:web:f3be581f1fbde52e2f18db"
 };
 
 const app = initializeApp(firebaseConfig);
