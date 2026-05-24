@@ -81,7 +81,7 @@ export default function TelaLogin() {
             )}
 
             <div className="space-y-2">
-              <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Seu Usuário (Prefixo)</label>
+              <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Seu Usuário ou E-mail</label>
               <div className="relative group">
                 <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors">
                   <Mail size={18} />
@@ -91,7 +91,7 @@ export default function TelaLogin() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-800 transition-all focus:bg-white focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none placeholder:text-slate-300"
-                  placeholder="ex: joao.vendas"
+                  placeholder="ex: joao.vendas ou seu@email.com"
                   required
                 />
               </div>

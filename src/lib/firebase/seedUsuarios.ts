@@ -41,6 +41,13 @@ export async function executarSeedDeDados() {
     // 2. Definir Usuários
     const usuariosParaCriar = [
       {
+        email: 'insanusconcursos@gmail.com',
+        senha: 'Ins@nus110921',
+        nome: 'Administrador Insanus',
+        papel: 'admin' as const,
+        setorId: 'todos'
+      },
+      {
         email: 'admin@insanuschat.com',
         senha: 'admin123',
         nome: 'Admin Geral',

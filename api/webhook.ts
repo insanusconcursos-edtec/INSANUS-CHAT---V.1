@@ -4,38 +4,40 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { GoogleGenAI, Type } from "@google/genai";
-import { buscarChatPorContato, salvarMensagem, criarNovoChat } from "../src/lib/firebase/services";
 
 /**
- * Handler definitivo para Webhook da Meta e APIs do sistema na Vercel
+ * Handler Fail-Safe para Webhook da Meta e APIs do sistema na Vercel
+ * Estrutura otimizada para handshake ultrarrápido (GET)
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const { method, query, body, url } = req;
-  const path = url || '';
+  const { method, query } = req;
 
-  // 1. HANDSHAKE DE VALIDAÇÃO (GET)
+  // 1. HANDSHAKE DE VALIDAÇÃO (GET) - PRIORIDADE MÁXIMA
+  // Executado antes de qualquer inicialização pesada para evitar timeout na Meta
   if (method === 'GET') {
-    // Rota do Webhook da Meta
-    if (path.includes('/api/webhooks/meta') || path.includes('hub.mode')) {
-      const mode = query['hub.mode'];
-      const token = query['hub.verify_token'];
-      const challenge = query['hub.challenge'];
+    const mode = query['hub.mode'];
+    const token = query['hub.verify_token'];
+    const challenge = query['hub.challenge'];
 
-      if (mode === 'subscribe' && token === process.env.META_VERIFY_TOKEN) {
-        console.log('✅ WEBHOOK_VERIFIED');
-        return res.status(200).send(challenge);
-      }
-      return res.status(403).send('Forbidden');
+    if (mode === 'subscribe' && token === process.env.META_VERIFY_TOKEN) {
+      console.log('✅ WEBHOOK_VERIFIED');
+      // Meta exige o challenge puro como texto
+      return res.status(200).send(challenge);
     }
-    return res.status(200).send('API is Live');
+
+    // Apenas para verificação manual no navegador se o endpoint está ativo
+    return res.status(200).send('API is Live and Ready for Handshake');
   }
 
   // 2. PROCESSAMENTO DE EVENTOS E APIS (POST)
+  // Inicialização pesada ocorre apenas se a requisição for POST
   if (method === 'POST') {
-    // --- ROTA: WEBHOOK META ---
-    if (path.includes('/api/webhooks/meta') || body.object) {
-      try {
+    const { body, url } = req;
+    const path = url || '';
+
+    try {
+      // --- ROTA: WEBHOOK META (WhatsApp / Instagram) ---
+      if (path.includes('/api/webhooks/meta') || body.object) {
         const bodyValue = body;
         
         // WhatsApp
@@ -48,7 +50,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   const texto = msg.text?.body || (msg.type !== 'text' ? `[Mensagem do tipo ${msg.type}]` : "Mensagem vazia");
                   const nomeCliente = change.value.contacts?.[0]?.profile?.name || contato;
 
-                  // Processamento assíncrono para retorno rápido para a Meta
+                  // Processamento assíncrono para retorno imediato (evita timeout de 3s da Meta)
                   processarEventoWhatsApp(contato, texto, nomeCliente).catch(e => 
                     console.error("[WhatsApp Error]:", e)
                   );
@@ -73,19 +75,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         return res.status(200).send('EVENT_RECEIVED');
-      } catch (error) {
-        console.error("[Webhook Error]:", error);
-        return res.status(200).send('ERROR_ACKNOWLEDGED');
       }
-    }
 
-    // --- ROTA: API CHAT (GEMINI) ---
-    if (path.includes('/api/chat')) {
-      try {
+      // --- ROTA: API CHAT (GEMINI) ---
+      if (path.includes('/api/chat')) {
+        const { GoogleGenAI } = await import("@google/genai");
         const { texto, historico, sistemaPrompt } = body;
-        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+        const ai = new GoogleGenAI({ 
+          apiKey: process.env.GEMINI_API_KEY || '',
+          httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
+        });
         const result = await ai.models.generateContent({
-          model: "gemini-1.5-flash", 
+          model: "gemini-3.5-flash", 
           config: { systemInstruction: sistemaPrompt },
           contents: [
             ...(historico || []).map((h: any) => ({ 
@@ -96,22 +97,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ]
         });
         return res.json({ resposta: result.text || "" });
-      } catch (error) {
-        console.error("Chat API error:", error);
-        return res.status(500).json({ error: "Internal server error" });
       }
-    }
 
-    // --- ROTA: API TRIAGEM (GEMINI) ---
-    if (path.includes('/api/triage')) {
-      try {
+      // --- ROTA: API TRIAGEM (GEMINI) ---
+      if (path.includes('/api/triage')) {
+        const { GoogleGenAI, Type } = await import("@google/genai");
         const { texto } = body;
-        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+        const ai = new GoogleGenAI({ 
+          apiKey: process.env.GEMINI_API_KEY || '',
+          httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
+        });
+
         const response = await ai.models.generateContent({
-          model: "gemini-1.5-flash",
-          contents: `Analise a seguinte mensagem de um cliente em uma plataforma CRM e categorize-a em um dos seguintes setores: "Comercial", "Financeiro" ou "Suporte Pedagógico".
-          Mensagem: "${texto}"
-          Responda obrigatoriamente no formato JSON: {"setor": "...", "justificativa": "...", "confianca": 0-1}`,
+          model: "gemini-3.5-flash",
+          contents: `Analise a seguinte mensagem de um cliente em uma plataforma CRM e categorize-a em um dos seguintes setores: "Comercial", "Financeiro" ou "Suporte Pedagógico".\nMensagem: "${texto}"`,
           config: {
             responseMimeType: "application/json",
             responseSchema: {
@@ -126,10 +125,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           },
         });
         return res.json(JSON.parse(response.text || "{}"));
-      } catch (error) {
-        console.error("Triage error:", error);
-        return res.status(500).json({ error: "Internal server error" });
       }
+
+    } catch (error) {
+      console.error("[POST Handler Error]:", error);
+      return res.status(500).json({ error: "Internal Server Error" });
     }
   }
 
@@ -137,9 +137,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 }
 
 /**
- * Funções auxiliares para processamento assíncrono (melhora latência do webhook)
+ * Funções auxiliares com importações dinâmicas para isolar o Firebase
  */
 async function processarEventoWhatsApp(contato: string, texto: string, nomeCliente: string) {
+  const { buscarChatPorContato, salvarMensagem, criarNovoChat } = await import("../src/lib/firebase/services");
+  
   let chat = await buscarChatPorContato(contato, 'whatsapp');
   let chatId = chat?.id;
 
@@ -160,6 +162,8 @@ async function processarEventoWhatsApp(contato: string, texto: string, nomeClien
 }
 
 async function processarEventoInstagram(senderId: string, texto: string) {
+  const { buscarChatPorContato, salvarMensagem, criarNovoChat } = await import("../src/lib/firebase/services");
+
   let chat = await buscarChatPorContato(senderId, 'instagram');
   let chatId = chat?.id;
 
@@ -178,3 +182,4 @@ async function processarEventoInstagram(senderId: string, texto: string) {
     console.log(`[Instagram Success] Msg de ${senderId} processada.`);
   }
 }
+
