@@ -40,18 +40,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (path.includes('/api/webhooks/meta') || body.object) {
         const bodyValue = body;
         
+        // --- MAPEAMENTO MULTICANAL ---
+        const getMetaToken = (id: string) => {
+          if (id === process.env.META_PAGE_ID_INSANUS) return process.env.META_TOKEN_INSANUS;
+          if (id === process.env.META_PAGE_ID_GABARITO) return process.env.META_TOKEN_GABARITO;
+          if (id === process.env.META_PAGE_ID_ENEM) return process.env.META_TOKEN_ENEM;
+          return process.env.META_ACCESS_TOKEN; // Fallback
+        };
+
         // WhatsApp
         if (bodyValue.object === "whatsapp_business_account") {
           for (const entry of bodyValue.entry || []) {
             for (const change of entry.changes || []) {
               if (change.value.messages) {
+                const phoneId = change.value.metadata?.phone_number_id;
+                const token = getMetaToken(phoneId);
+
                 for (const msg of change.value.messages) {
                   const contato = msg.from; 
                   const texto = msg.text?.body || (msg.type !== 'text' ? `[Mensagem do tipo ${msg.type}]` : "Mensagem vazia");
                   const nomeCliente = change.value.contacts?.[0]?.profile?.name || contato;
 
-                  // Processamento assíncrono para retorno imediato (evita timeout de 3s da Meta)
-                  processarEventoWhatsApp(contato, texto, nomeCliente).catch(e => 
+                  // Processamento assíncrono para retorno imediato
+                  processarEventoWhatsApp(contato, texto, nomeCliente, phoneId, token).catch(e => 
                     console.error("[WhatsApp Error]:", e)
                   );
                 }
@@ -63,11 +74,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Instagram
         if (bodyValue.object === "instagram") {
           for (const entry of bodyValue.entry || []) {
+            const pageId = entry.id; // ID da conta Instagram/Página Facebook
+            const token = getMetaToken(pageId);
+
             for (const msgObj of entry.messaging || []) {
               const senderId = msgObj.sender.id;
               const texto = msgObj.message?.text || "[Instagram Media]";
               
-              processarEventoInstagram(senderId, texto).catch(e => 
+              processarEventoInstagram(senderId, texto, pageId, token).catch(e => 
                 console.error("[Instagram Error]:", e)
               );
             }
@@ -139,7 +153,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 /**
  * Funções auxiliares com importações dinâmicas para isolar o Firebase
  */
-async function processarEventoWhatsApp(contato: string, texto: string, nomeCliente: string) {
+async function processarEventoWhatsApp(contato: string, texto: string, nomeCliente: string, phoneId: string | undefined, token: string | undefined) {
   const { buscarChatPorContato, salvarMensagem, criarNovoChat } = await import("../src/lib/firebase/services");
   
   let chat = await buscarChatPorContato(contato, 'whatsapp');
@@ -151,17 +165,20 @@ async function processarEventoWhatsApp(contato: string, texto: string, nomeClien
       clienteTelefone: contato,
       canal: 'whatsapp',
       setorId: 'triagem-id',
-      origem: 'Portal Meta'
+      origem: 'Portal Meta',
+      origemId: phoneId // Guardamos o ID do canal para resposta posterior
     });
   }
 
   if (chatId) {
+    // Aqui poderíamos salvar o token na sessão do chat se necessário, 
+    // mas por agora garantimos que a mensagem é salva.
     await salvarMensagem(chatId, 'cliente', texto);
-    console.log(`[WhatsApp Success] Msg de ${contato} processada.`);
+    console.log(`[WhatsApp Success] Msg de ${contato} processada (Canal: ${phoneId}).`);
   }
 }
 
-async function processarEventoInstagram(senderId: string, texto: string) {
+async function processarEventoInstagram(senderId: string, texto: string, pageId: string | undefined, token: string | undefined) {
   const { buscarChatPorContato, salvarMensagem, criarNovoChat } = await import("../src/lib/firebase/services");
 
   let chat = await buscarChatPorContato(senderId, 'instagram');
@@ -173,13 +190,14 @@ async function processarEventoInstagram(senderId: string, texto: string) {
       clienteTelefone: senderId,
       canal: 'instagram',
       setorId: 'triagem-id',
-      origem: 'IG Direct'
+      origem: 'IG Direct',
+      origemId: pageId // Guardamos o ID da conta Instagram
     });
   }
 
   if (chatId) {
     await salvarMensagem(chatId, 'cliente', texto);
-    console.log(`[Instagram Success] Msg de ${senderId} processada.`);
+    console.log(`[Instagram Success] Msg de ${senderId} processada (Canal: ${pageId}).`);
   }
 }
 

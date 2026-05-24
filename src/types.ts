@@ -37,6 +37,7 @@ export interface Chat {
   dataUltimaMensagem: Date;
   semRespostaDesde: Date | null;
   origem: string;
+  origemId?: string;
   tags: string[];
   iaStatus?: 'pensando' | 'respondido' | 'erro';
   iaNote?: string;

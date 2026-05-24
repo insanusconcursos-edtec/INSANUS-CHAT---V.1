@@ -66,6 +66,7 @@ export async function criarNovoChat(dados: {
   canal: CanalAtendimento;
   setorId: string;
   origem: string;
+  origemId?: string;
 }) {
   const path = 'chats';
   try {
