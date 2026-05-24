@@ -117,8 +117,8 @@ async function processarRespostaIA(chatId: string) {
     const chatData = chatSnap.data();
     
     // 2. Verificações de segurança antes de processar
-    if (chatData.iaStatus === 'processando' || chatData.iaStatus === 'respondido') {
-      console.log(`[IA Worker] Chat ${chatId} já está sendo processado ou respondido. Abortando.`);
+    if (chatData.iaStatus === 'processando') {
+      console.log(`[IA Worker] Chat ${chatId} já está sendo processado pela IA. Abortando.`);
       return;
     }
 

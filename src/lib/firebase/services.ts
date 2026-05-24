@@ -78,6 +78,7 @@ export async function criarNovoChat(dados: {
     const docRef = await addDoc(collection(db, path), {
       ...dados,
       statusEtapa: 'novo',
+      iaStatus: 'novo',
       atendenteId: null,
       dataUltimaMensagem: serverTimestamp(),
       semRespostaDesde: serverTimestamp(),
@@ -194,7 +195,7 @@ export async function salvarMensagem(chatId: string, remetente: RemetenteMensage
       dataUltimaMensagem: serverTimestamp(),
       // Se for mensagem do cliente, marca que está aguardando resposta e reseta status da IA
       ...(remetente === 'cliente' 
-          ? { semRespostaDesde: serverTimestamp(), iaStatus: 'pendente' } 
+          ? { semRespostaDesde: serverTimestamp(), iaStatus: 'novo' } 
           : { semRespostaDesde: null }
       )
     });

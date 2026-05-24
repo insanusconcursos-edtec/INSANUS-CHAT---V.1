@@ -140,9 +140,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const chatSnap = await getDoc(doc(db, 'chats', chatId));
             if (chatSnap.exists()) {
               const data = chatSnap.data();
-              // Se já foi respondido ou está em processamento avançado, interrompe
-              if (data.iaStatus === 'respondido' || data.iaStatus === 'processando') {
-                console.log(`[API Chat] Chat ${chatId} já foi respondido ou está em processamento. Ignorando requisição duplicada.`);
+              // Se já está em processamento, interrompe para evitar loop. 
+              // Permitimos prosseguir se for 'novo', 'pendente' ou 'respondido' (resetado por nova mensagem)
+              if (data.iaStatus === 'processando') {
+                console.log(`[API Chat] Chat ${chatId} já está em processamento. Ignorando requisição duplicada.`);
                 return res.json({ resposta: "" });
               }
             }
