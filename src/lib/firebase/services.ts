@@ -63,6 +63,7 @@ async function semearSetores() {
 export async function criarNovoChat(dados: {
   clienteNome: string;
   clienteTelefone: string;
+  clienteFoto?: string;
   canal: CanalAtendimento;
   setorId: string;
   origem: string;

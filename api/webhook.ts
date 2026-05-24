@@ -71,6 +71,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         // WhatsApp
         if (bodyValue.object === "whatsapp_business_account") {
+          // Respond immediately to prevent retries
+          res.status(200).send('EVENT_RECEIVED');
+
           for (const entry of bodyValue.entry || []) {
             for (const change of entry.changes || []) {
               if (change.value.messages) {
@@ -79,31 +82,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 
                 console.log(`[WhatsApp Payload] PhoneID: ${phoneId}, Token found: ${token ? 'YES' : 'NO'}`);
 
-                const promises = [];
                 for (const msg of change.value.messages) {
                   const contato = msg.from; 
                   const texto = msg.text?.body || (msg.type !== 'text' ? `[Mensagem do tipo ${msg.type}]` : "Mensagem vazia");
                   const nomeCliente = change.value.contacts?.[0]?.profile?.name || contato;
 
-                  promises.push(processarEventoWhatsApp(contato, texto, nomeCliente, phoneId, token).catch(e => 
+                  // Execute in background
+                  processarEventoWhatsApp(contato, texto, nomeCliente, phoneId, token).catch(e => 
                     console.error("[WhatsApp Error]:", e)
-                  ));
+                  );
                 }
-                await Promise.all(promises);
               }
             }
           }
+          return;
         }
 
         // Instagram
         if (bodyValue.object === "instagram") {
+          // Respond immediately to prevent retries
+          res.status(200).send('EVENT_RECEIVED');
+
           for (const entry of bodyValue.entry || []) {
             const pageId = entry.id; // ID da conta Instagram/Página Facebook
             const token = getMetaToken(pageId);
             
             console.log(`[Instagram Payload] PageID: ${pageId}, Token found: ${token ? 'YES' : 'NO'}`);
 
-            const promises = [];
             for (const msgObj of entry.messaging || []) {
               const senderId = msgObj.sender?.id;
               const recipientId = msgObj.recipient?.id;
@@ -117,14 +122,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               
               console.log(`[Instagram Message] Sender: ${senderId}, Recipient: ${recipientId}, Text: ${texto}`);
 
-              promises.push(processarEventoInstagram(senderId, texto, pageId, token).catch(e => 
+              // Execute in background
+              processarEventoInstagram(senderId, texto, pageId, token).catch(e => 
                 console.error("[Instagram Error]:", e)
-              ));
+              );
             }
-            await Promise.all(promises);
           }
+          return;
         }
-        return res.status(200).send('EVENT_RECEIVED');
       }
 
       // --- ROTA: API CHAT (GEMINI) ---
@@ -234,13 +239,33 @@ async function processarEventoInstagram(senderId: string, texto: string, pageId:
 
     if (!chatId) {
       console.log(`[Instagram Debug] Chat não encontrado. Criando novo chat para: ${senderId}`);
+      
+      let nomeCliente = `IG User ${senderId.slice(-4)}`;
+      let fotoCliente = '';
+
+      // Tenta buscar perfil real do Instagram
+      if (token) {
+        try {
+          const profileRes = await fetch(`https://graph.facebook.com/v21.0/${senderId}?fields=name,profile_pic&access_token=${token}`);
+          if (profileRes.ok) {
+            const profileData = await profileRes.json();
+            if (profileData.name) nomeCliente = profileData.name;
+            if (profileData.profile_pic) fotoCliente = profileData.profile_pic;
+            console.log(`[Instagram Debug] Perfil encontrado: ${nomeCliente}`);
+          }
+        } catch (e) {
+          console.error('[Instagram Profile Error]', e);
+        }
+      }
+
       chatId = await criarNovoChat({
-        clienteNome: `IG User ${senderId.slice(-4)}`,
+        clienteNome: nomeCliente,
         clienteTelefone: senderId,
         canal: 'instagram',
         setorId: 'triagem-id',
         origem: 'IG Direct',
-        origemId: pageId // Guardamos o ID da conta Instagram
+        origemId: pageId, // Guardamos o ID da conta Instagram
+        clienteFoto: fotoCliente
       });
       console.log(`[Instagram Debug] Novo chat criado. ID: ${chatId}`);
     }

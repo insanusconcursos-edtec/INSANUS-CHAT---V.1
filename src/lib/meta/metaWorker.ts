@@ -63,7 +63,8 @@ async function processarUltimaMensagemSaida(chatId: string, chatData: any) {
         const result = await enviarMensagemPeloCanal(
            chatData.clienteTelefone, 
            msg.texto, 
-           chatData.canal
+           chatData.canal,
+           chatData.origemId
         );
 
         if (result && (result.messages?.[0]?.id || result.message_id)) {

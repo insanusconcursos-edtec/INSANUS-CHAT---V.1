@@ -30,6 +30,7 @@ export interface Chat {
   id: string;
   clienteNome: string;
   clienteTelefone: string;
+  clienteFoto?: string;
   canal: CanalAtendimento;
   statusEtapa: EtapaFunil;
   atendenteId: string | null;
