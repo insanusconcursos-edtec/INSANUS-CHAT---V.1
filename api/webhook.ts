@@ -53,21 +53,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.log('WEBHOOK PAYLOAD META:', JSON.stringify(body, null, 2));
 
     try {
+      // --- MAPEAMENTO MULTICANAL ---
+      const getMetaToken = (id: string) => {
+        // Insanus (WhatsApp, Page ID ou Instagram ID)
+        const idInsanus = [getEnv('META_PAGE_ID_INSANUS'), getEnv('META_INSTAGRAM_ID_INSANUS'), '17841448523782454'];
+        if (idInsanus.includes(id)) {
+          return getEnv('META_TOKEN_INSANUS');
+        }
+        if (id === getEnv('META_PAGE_ID_GABARITO')) return getEnv('META_TOKEN_GABARITO');
+        if (id === getEnv('META_PAGE_ID_ENEM')) return getEnv('META_TOKEN_ENEM');
+        return getEnv('META_ACCESS_TOKEN'); // Fallback
+      };
+
       // --- ROTA: WEBHOOK META (WhatsApp / Instagram) ---
       if (path.includes('/api/webhooks/meta') || body.object) {
         const bodyValue = body;
-        
-        // --- MAPEAMENTO MULTICANAL ---
-        const getMetaToken = (id: string) => {
-          // Insanus (WhatsApp, Page ID ou Instagram ID)
-          const idInsanus = [getEnv('META_PAGE_ID_INSANUS'), getEnv('META_INSTAGRAM_ID_INSANUS'), '17841448523782454'];
-          if (idInsanus.includes(id)) {
-            return getEnv('META_TOKEN_INSANUS');
-          }
-          if (id === getEnv('META_PAGE_ID_GABARITO')) return getEnv('META_TOKEN_GABARITO');
-          if (id === getEnv('META_PAGE_ID_ENEM')) return getEnv('META_TOKEN_ENEM');
-          return getEnv('META_ACCESS_TOKEN'); // Fallback
-        };
 
         // WhatsApp
         if (bodyValue.object === "whatsapp_business_account") {
@@ -131,43 +131,104 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (path.includes('/api/chat')) {
         const { GoogleGenAI } = await import("@google/genai");
         const { texto, historico, sistemaPrompt, chatId } = body;
+        
+        let chatData: any = null;
 
-        // Idempotência: Se chatId for provido, verifica status no Firestore para evitar duplicidade
+        // Idempotência e busca de metadados
         if (chatId) {
           try {
             const { getDoc, doc } = await import("firebase/firestore");
             const { db } = await import("../src/lib/firebase/config.js");
             const chatSnap = await getDoc(doc(db, 'chats', chatId));
             if (chatSnap.exists()) {
-              const data = chatSnap.data();
+              chatData = chatSnap.data();
               // Se já está em processamento, interrompe para evitar loop. 
-              // Permitimos prosseguir se for 'novo', 'pendente' ou 'respondido' (resetado por nova mensagem)
-              if (data.iaStatus === 'processando') {
+              if (chatData.iaStatus === 'processando') {
                 console.log(`[API Chat] Chat ${chatId} já está em processamento. Ignorando requisição duplicada.`);
                 return res.json({ resposta: "" });
               }
             }
           } catch (e) {
-            console.error("[API Chat] Erro ao verificar idempotência:", e);
+            console.error("[API Chat] Erro ao verificar idempotência/chat:", e);
           }
         }
 
-        const ai = new GoogleGenAI({ 
-          apiKey: getEnv('GEMINI_API_KEY'),
-          httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
-        });
-        const result = await ai.models.generateContent({
-          model: "gemini-3.5-flash", 
-          config: { systemInstruction: sistemaPrompt },
-          contents: [
-            ...(historico || []).map((h: any) => ({ 
-              role: h.remetente === 'cliente' ? 'user' : 'model', 
-              parts: [{ text: h.texto }] 
-            })),
-            { role: 'user', parts: [{ text: texto }] }
-          ]
-        });
-        return res.json({ resposta: result.text || "" });
+        const fallbackResponse = "Olá! Recebi sua mensagem. Um de nossos consultores humanos já vai te atender em instantes!";
+        let respostaFinal = "";
+
+        try {
+          const apiKey = getEnv('GEMINI_API_KEY');
+          if (!apiKey) throw new Error("GEMINI_API_KEY não configurada");
+
+          const ai = new GoogleGenAI({ 
+            apiKey,
+            httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
+          });
+
+          const history = (historico || []).map((h: any) => ({ 
+            role: h.remetente === 'cliente' ? 'user' : 'model', 
+            parts: [{ text: h.texto }] 
+          }));
+
+          console.log(`[API Chat] A chamar Gemini para chat ${chatId || 'unknown'}. Histórico: ${history.length} msgs.`);
+          
+          const result = await ai.models.generateContent({
+            model: "gemini-3.5-flash", 
+            config: { systemInstruction: sistemaPrompt },
+            contents: [
+              ...history,
+              { role: 'user', parts: [{ text: texto }] }
+            ]
+          });
+
+          respostaFinal = result.text || "";
+          console.log(`[API Chat] Resposta recebida do Gemini: "${respostaFinal.slice(0, 50)}..."`);
+
+          if (!respostaFinal.trim()) {
+            console.warn("[API Chat] Gemini devolveu texto vazio. Usando fallback.");
+            respostaFinal = fallbackResponse;
+          }
+        } catch (error) {
+          console.error("[API Chat] Erro crítico na chamada do Gemini:", error);
+          respostaFinal = fallbackResponse;
+        }
+
+        // --- OUTBOUND: ENVIO PARA O INSTAGRAM ---
+        if (chatData && chatData.canal === 'instagram' && chatData.clienteTelefone && chatData.origemId) {
+          try {
+            const pageId = chatData.origemId;
+            const senderId = chatData.clienteTelefone;
+            const token = getMetaToken(pageId);
+
+            if (token) {
+              console.log(`[API Chat] Enviando outbound para Instagram: ${senderId} via Page ${pageId}`);
+              const metaRes = await fetch(`https://graph.facebook.com/v25.0/${pageId}/messages`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                  recipient: { id: senderId },
+                  message: { text: respostaFinal }
+                })
+              });
+
+              if (metaRes.ok) {
+                console.log(`[API Chat] ✅ Resposta enviada com sucesso para o Instagram.`);
+              } else {
+                const errorData = await metaRes.json();
+                console.error(`[API Chat] ❌ Falha ao enviar para Instagram (Status ${metaRes.status}):`, JSON.stringify(errorData));
+              }
+            } else {
+              console.warn(`[API Chat] Token Meta não encontrado para Page ${pageId}. Outbound ignorado.`);
+            }
+          } catch (outboundError) {
+            console.error("[API Chat] Erro ao processar outbound Meta:", outboundError);
+          }
+        }
+
+        return res.json({ resposta: respostaFinal });
       }
 
       // --- ROTA: API TRIAGEM (GEMINI) ---
