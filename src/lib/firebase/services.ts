@@ -192,8 +192,11 @@ export async function salvarMensagem(chatId: string, remetente: RemetenteMensage
     // 2. Atualiza o timestamp da última mensagem no chat pai
     await updateDoc(doc(db, 'chats', chatId), {
       dataUltimaMensagem: serverTimestamp(),
-      // Se for mensagem do cliente, marca que está aguardando resposta
-      ...(remetente === 'cliente' ? { semRespostaDesde: serverTimestamp() } : { semRespostaDesde: null })
+      // Se for mensagem do cliente, marca que está aguardando resposta e reseta status da IA
+      ...(remetente === 'cliente' 
+          ? { semRespostaDesde: serverTimestamp(), iaStatus: 'pendente' } 
+          : { semRespostaDesde: null }
+      )
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);

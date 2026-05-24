@@ -14,10 +14,10 @@ import type { Mensagem } from '@/src/types';
  */
 export async function gerarRespostaVendedorVirtual(chatId: string, historico: Mensagem[]) {
   try {
-    // 1. Sinaliza visualmente no Firestore que a IA está processando
+    // 1. Sinaliza visualmente no Firestore que a IA está processando (Trava de estado)
     const chatRef = doc(db, 'chats', chatId);
     await updateDoc(chatRef, {
-      iaStatus: 'pensando',
+      iaStatus: 'processando',
       updatedAt: serverTimestamp()
     });
 
@@ -28,6 +28,7 @@ export async function gerarRespostaVendedorVirtual(chatId: string, historico: Me
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        chatId, // Passamos o chatId para o backend validar idempotência
         texto: ultimaMensagem,
         historico: historico.slice(-5), // Envia apenas as últimas 5 para contexto
         sistemaPrompt: SYSTEM_PROMPT_VENDAS

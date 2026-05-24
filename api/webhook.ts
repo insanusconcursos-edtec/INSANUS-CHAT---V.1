@@ -130,7 +130,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // --- ROTA: API CHAT (GEMINI) ---
       if (path.includes('/api/chat')) {
         const { GoogleGenAI } = await import("@google/genai");
-        const { texto, historico, sistemaPrompt } = body;
+        const { texto, historico, sistemaPrompt, chatId } = body;
+
+        // Idempotência: Se chatId for provido, verifica status no Firestore para evitar duplicidade
+        if (chatId) {
+          try {
+            const { getDoc, doc } = await import("firebase/firestore");
+            const { db } = await import("../src/lib/firebase/config.js");
+            const chatSnap = await getDoc(doc(db, 'chats', chatId));
+            if (chatSnap.exists()) {
+              const data = chatSnap.data();
+              // Se já foi respondido ou está em processamento avançado, interrompe
+              if (data.iaStatus === 'respondido' || data.iaStatus === 'processando') {
+                console.log(`[API Chat] Chat ${chatId} já foi respondido ou está em processamento. Ignorando requisição duplicada.`);
+                return res.json({ resposta: "" });
+              }
+            }
+          } catch (e) {
+            console.error("[API Chat] Erro ao verificar idempotência:", e);
+          }
+        }
+
         const ai = new GoogleGenAI({ 
           apiKey: getEnv('GEMINI_API_KEY'),
           httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
