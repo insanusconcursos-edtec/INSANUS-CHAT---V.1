@@ -49,6 +49,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { body, url } = req;
     const path = url || '';
 
+    // LOG DO PAYLOAD COMPLETO DA META
+    console.log('WEBHOOK PAYLOAD META:', JSON.stringify(body, null, 2));
+
     try {
       // --- ROTA: WEBHOOK META (WhatsApp / Instagram) ---
       if (path.includes('/api/webhooks/meta') || body.object) {
@@ -69,13 +72,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               if (change.value.messages) {
                 const phoneId = change.value.metadata?.phone_number_id;
                 const token = getMetaToken(phoneId);
+                
+                console.log(`[WhatsApp Payload] PhoneID: ${phoneId}, Token found: ${token ? 'YES' : 'NO'}`);
 
                 for (const msg of change.value.messages) {
                   const contato = msg.from; 
                   const texto = msg.text?.body || (msg.type !== 'text' ? `[Mensagem do tipo ${msg.type}]` : "Mensagem vazia");
                   const nomeCliente = change.value.contacts?.[0]?.profile?.name || contato;
 
-                  // Processamento assíncrono para retorno imediato
                   processarEventoWhatsApp(contato, texto, nomeCliente, phoneId, token).catch(e => 
                     console.error("[WhatsApp Error]:", e)
                   );
@@ -90,18 +94,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           for (const entry of bodyValue.entry || []) {
             const pageId = entry.id; // ID da conta Instagram/Página Facebook
             const token = getMetaToken(pageId);
+            
+            console.log(`[Instagram Payload] PageID: ${pageId}, Token found: ${token ? 'YES' : 'NO'}`);
 
             for (const msgObj of entry.messaging || []) {
-              const senderId = msgObj.sender.id;
-              const texto = msgObj.message?.text || "[Instagram Media]";
+              const senderId = msgObj.sender?.id;
+              const recipientId = msgObj.recipient?.id;
               
+              if (!senderId) {
+                console.warn("[Instagram Warning] Mensagem sem senderId, ignorando.", msgObj);
+                continue;
+              }
+
+              const texto = msgObj.message?.text || "[Instagram Media/Interaction]";
+              
+              console.log(`[Instagram Message] Sender: ${senderId}, Recipient: ${recipientId}, Text: ${texto}`);
+
               processarEventoInstagram(senderId, texto, pageId, token).catch(e => 
                 console.error("[Instagram Error]:", e)
               );
             }
           }
         }
-
         return res.status(200).send('EVENT_RECEIVED');
       }
 
@@ -168,50 +182,63 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
  * Funções auxiliares com importações dinâmicas para isolar o Firebase
  */
 async function processarEventoWhatsApp(contato: string, texto: string, nomeCliente: string, phoneId: string | undefined, token: string | undefined) {
-  const { buscarChatPorContato, salvarMensagem, criarNovoChat } = await import("../src/lib/firebase/services.js");
-  
-  let chat = await buscarChatPorContato(contato, 'whatsapp');
-  let chatId = chat?.id;
+  try {
+    const { buscarChatPorContato, salvarMensagem, criarNovoChat } = await import("../src/lib/firebase/services.js");
+    
+    let chat = await buscarChatPorContato(contato, 'whatsapp');
+    let chatId = chat?.id;
 
-  if (!chatId) {
-    chatId = await criarNovoChat({
-      clienteNome: nomeCliente,
-      clienteTelefone: contato,
-      canal: 'whatsapp',
-      setorId: 'triagem-id',
-      origem: 'Portal Meta',
-      origemId: phoneId // Guardamos o ID do canal para resposta posterior
-    });
-  }
+    if (!chatId) {
+      chatId = await criarNovoChat({
+        clienteNome: nomeCliente,
+        clienteTelefone: contato,
+        canal: 'whatsapp',
+        setorId: 'triagem-id',
+        origem: 'Portal Meta',
+        origemId: phoneId // Guardamos o ID do canal para resposta posterior
+      });
+    }
 
-  if (chatId) {
-    // Aqui poderíamos salvar o token na sessão do chat se necessário, 
-    // mas por agora garantimos que a mensagem é salva.
-    await salvarMensagem(chatId, 'cliente', texto);
-    console.log(`[WhatsApp Success] Msg de ${contato} processada (Canal: ${phoneId}).`);
+    if (chatId) {
+      // Garantimos que a mensagem é salva no Firestore
+      await salvarMensagem(chatId, 'cliente', texto);
+      console.log(`[WhatsApp Success] Msg de ${contato} processada (Canal: ${phoneId}).`);
+    } else {
+      console.warn(`[WhatsApp Warning] Não foi possível encontrar ou criar chat para ${contato}`);
+    }
+  } catch (error) {
+    console.error('ERRO AO SALVAR WHATSAPP NO FIRESTORE:', error);
+    throw error;
   }
 }
 
 async function processarEventoInstagram(senderId: string, texto: string, pageId: string | undefined, token: string | undefined) {
-  const { buscarChatPorContato, salvarMensagem, criarNovoChat } = await import("../src/lib/firebase/services.js");
+  try {
+    const { buscarChatPorContato, salvarMensagem, criarNovoChat } = await import("../src/lib/firebase/services.js");
 
-  let chat = await buscarChatPorContato(senderId, 'instagram');
-  let chatId = chat?.id;
+    let chat = await buscarChatPorContato(senderId, 'instagram');
+    let chatId = chat?.id;
 
-  if (!chatId) {
-    chatId = await criarNovoChat({
-      clienteNome: `IG User ${senderId.slice(-4)}`,
-      clienteTelefone: senderId,
-      canal: 'instagram',
-      setorId: 'triagem-id',
-      origem: 'IG Direct',
-      origemId: pageId // Guardamos o ID da conta Instagram
-    });
-  }
+    if (!chatId) {
+      chatId = await criarNovoChat({
+        clienteNome: `IG User ${senderId.slice(-4)}`,
+        clienteTelefone: senderId,
+        canal: 'instagram',
+        setorId: 'triagem-id',
+        origem: 'IG Direct',
+        origemId: pageId // Guardamos o ID da conta Instagram
+      });
+    }
 
-  if (chatId) {
-    await salvarMensagem(chatId, 'cliente', texto);
-    console.log(`[Instagram Success] Msg de ${senderId} processada (Canal: ${pageId}).`);
+    if (chatId) {
+      await salvarMensagem(chatId, 'cliente', texto);
+      console.log(`[Instagram Success] Msg de ${senderId} processada (Canal: ${pageId}).`);
+    } else {
+      console.warn(`[Instagram Warning] Não foi possível encontrar ou criar chat para ${senderId}`);
+    }
+  } catch (error) {
+    console.error('ERRO AO SALVAR INSTAGRAM NO FIRESTORE:', error);
+    throw error;
   }
 }
 
