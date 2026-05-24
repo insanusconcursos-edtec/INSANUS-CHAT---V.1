@@ -59,7 +59,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         
         // --- MAPEAMENTO MULTICANAL ---
         const getMetaToken = (id: string) => {
-          if (id === getEnv('META_PAGE_ID_INSANUS')) return getEnv('META_TOKEN_INSANUS');
+          // Insanus (WhatsApp, Page ID ou Instagram ID)
+          const idInsanus = [getEnv('META_PAGE_ID_INSANUS'), getEnv('META_INSTAGRAM_ID_INSANUS'), '17841448523782454'];
+          if (idInsanus.includes(id)) {
+            return getEnv('META_TOKEN_INSANUS');
+          }
           if (id === getEnv('META_PAGE_ID_GABARITO')) return getEnv('META_TOKEN_GABARITO');
           if (id === getEnv('META_PAGE_ID_ENEM')) return getEnv('META_TOKEN_ENEM');
           return getEnv('META_ACCESS_TOKEN'); // Fallback
