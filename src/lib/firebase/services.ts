@@ -11,7 +11,11 @@ import {
   setDoc,
   serverTimestamp, 
   getDoc,
-  getDocFromServer
+  getDocFromServer,
+  query,
+  where,
+  getDocs,
+  limit
 } from 'firebase/firestore';
 import { db } from './config.js';
 import { handleFirestoreError, OperationType } from './errors.js';
@@ -139,20 +143,36 @@ export async function alterarEtapaFunil(chatId: string, novaEtapa: EtapaFunil) {
  * Busca um chat ativo pelo identificador do cliente (telefone ou ID externo)
  */
 export async function buscarChatPorContato(contato: string, canal: CanalAtendimento) {
-  const { query, where, getDocs, limit } = await import('firebase/firestore');
-  const q = query(
-    collection(db, 'chats'),
-    where('clienteTelefone', '==', contato),
-    where('canal', '==', canal),
-    where('statusEtapa', '!=', 'fechado'),
-    limit(1)
-  );
+  try {
+    const q = query(
+      collection(db, 'chats'),
+      where('clienteTelefone', '==', contato),
+      where('canal', '==', canal),
+      limit(10)
+    );
 
-  const snap = await getDocs(q);
-  if (!snap.empty) {
-    return { id: snap.docs[0].id, ...snap.docs[0].data() } as Chat;
+    // Timeout de 5 segundos para evitar hang infinito
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error("Firestore query timeout")), 5000)
+    );
+
+    const snap = await Promise.race([
+      getDocs(q),
+      timeoutPromise
+    ]) as any;
+
+    if (snap && !snap.empty) {
+      const chatsAtivos = snap.docs
+        .map((d: any) => ({ id: d.id, ...d.data() } as Chat))
+        .filter((c: Chat) => c.statusEtapa !== 'fechado');
+      
+      return chatsAtivos.length > 0 ? chatsAtivos[0] : null;
+    }
+    return null;
+  } catch (error) {
+    console.error("[Firebase Service] Erro em buscarChatPorContato:", error);
+    return null;
   }
-  return null;
 }
 
 /**

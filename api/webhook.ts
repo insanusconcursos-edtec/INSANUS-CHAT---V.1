@@ -72,7 +72,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // WhatsApp
         if (bodyValue.object === "whatsapp_business_account") {
           // Respond immediately to prevent retries
-          res.status(200).send('EVENT_RECEIVED');
+          if (!res.headersSent) res.status(200).send('EVENT_RECEIVED');
 
           for (const entry of bodyValue.entry || []) {
             for (const change of entry.changes || []) {
@@ -101,7 +101,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Instagram
         if (bodyValue.object === "instagram") {
           // Respond immediately to prevent retries
-          res.status(200).send('EVENT_RECEIVED');
+          if (!res.headersSent) res.status(200).send('EVENT_RECEIVED');
 
           for (const entry of bodyValue.entry || []) {
             const pageId = entry.id; // ID da conta Instagram/Página Facebook
@@ -232,55 +232,75 @@ async function processarEventoWhatsApp(contato: string, texto: string, nomeClien
 async function processarEventoInstagram(senderId: string, texto: string, pageId: string | undefined, token: string | undefined) {
   try {
     const { buscarChatPorContato, salvarMensagem, criarNovoChat } = await import("../src/lib/firebase/services.js");
+    const { doc, updateDoc } = await import("firebase/firestore");
+    const { db } = await import("../src/lib/firebase/config.js");
 
-    console.log(`[Instagram Debug] Buscando chat para senderId: ${senderId}`);
-    let chat = await buscarChatPorContato(senderId, 'instagram');
+    console.log(`[Instagram Debug] Buscando chat para senderId: ${senderId}...`);
+    let chat = null;
+    try {
+      chat = await buscarChatPorContato(senderId, 'instagram');
+      console.log(`[Instagram Debug] Resultado busca chat: ${chat ? 'Encontrado ' + chat.id + ' (Nome: ' + chat.clienteNome + ')' : 'Não encontrado'}`);
+    } catch (searchError) {
+      console.error("[Instagram Debug] Erro ao buscar chat:", searchError);
+    }
+
+    let nomeCliente = chat?.clienteNome || `IG User ${senderId.slice(-4)}`;
+    let fotoCliente = chat?.clienteFoto || '';
+
+    // Sempre tenta buscar perfil real do Instagram se for nome genérico ou novo chat
+    if (token && (nomeCliente.startsWith('IG User') || !chat)) {
+      try {
+        console.log(`[Instagram Debug] Buscando perfil real na Graph API v25.0...`);
+        const profileRes = await fetch(`https://graph.facebook.com/v25.0/${senderId}?fields=name,profile_pic&access_token=${token}`);
+        if (profileRes.ok) {
+          const profileData = await profileRes.json();
+          if (profileData.name) nomeCliente = profileData.name;
+          if (profileData.profile_pic) fotoCliente = profileData.profile_pic;
+          console.log(`[Instagram Debug] Perfil encontrado: ${nomeCliente}`);
+        } else {
+          console.warn(`[Instagram Debug] Erro ao buscar perfil (Graph API): ${profileRes.status}`);
+        }
+      } catch (e) {
+        console.error('[Instagram Profile Error]', e);
+      }
+    }
+
     let chatId = chat?.id;
 
     if (!chatId) {
-      console.log(`[Instagram Debug] Chat não encontrado. Criando novo chat para: ${senderId}`);
-      
-      let nomeCliente = `IG User ${senderId.slice(-4)}`;
-      let fotoCliente = '';
-
-      // Tenta buscar perfil real do Instagram
-      if (token) {
-        try {
-          const profileRes = await fetch(`https://graph.facebook.com/v21.0/${senderId}?fields=name,profile_pic&access_token=${token}`);
-          if (profileRes.ok) {
-            const profileData = await profileRes.json();
-            if (profileData.name) nomeCliente = profileData.name;
-            if (profileData.profile_pic) fotoCliente = profileData.profile_pic;
-            console.log(`[Instagram Debug] Perfil encontrado: ${nomeCliente}`);
-          }
-        } catch (e) {
-          console.error('[Instagram Profile Error]', e);
-        }
-      }
-
+      console.log(`[Instagram Debug] Criando novo chat para: ${senderId}`);
       chatId = await criarNovoChat({
         clienteNome: nomeCliente,
         clienteTelefone: senderId,
         canal: 'instagram',
         setorId: 'triagem-id',
         origem: 'IG Direct',
-        origemId: pageId, // Guardamos o ID da conta Instagram
+        origemId: pageId, 
         clienteFoto: fotoCliente
       });
       console.log(`[Instagram Debug] Novo chat criado. ID: ${chatId}`);
+    } else if (nomeCliente !== chat.clienteNome) {
+      // Atualiza o nome se foi encontrado um real
+      try {
+        await updateDoc(doc(db, 'chats', chatId), {
+          clienteNome: nomeCliente,
+          clienteFoto: fotoCliente
+        });
+        console.log(`[Instagram Debug] Dados do chat atualizados para: ${nomeCliente}`);
+      } catch (e) {
+        console.warn(`[Instagram Debug] Falha ao atualizar dados do chat:`, e);
+      }
     }
 
     if (chatId) {
       console.log(`[Instagram Debug] A TENTAR GUARDAR MENSAGEM NO FIRESTORE (ChatID: ${chatId})...`);
       await salvarMensagem(chatId, 'cliente', texto);
-      console.log(`[Instagram Debug] ✅ GUARDADO COM SUCESSO. ChatID: ${chatId}`);
-      console.log(`[Instagram Success] Msg de ${senderId} processada (Canal: ${pageId}).`);
+      console.log(`[Instagram Debug] ✅ MENSAGEM GUARDADA COM SUCESSO. ChatID: ${chatId}`);
     } else {
-      console.warn(`[Instagram Warning] Não foi possível encontrar ou criar chat para ${senderId}`);
+      console.warn(`[Instagram Warning] Falha ao obter ChatID para ${senderId}`);
     }
   } catch (error) {
-    console.error('ERRO AO SALVAR INSTAGRAM NO FIRESTORE:', error);
-    throw error;
+    console.error('ERRO CRÍTICO NO PROCESSAMENTO INSTAGRAM:', error);
   }
 }
 
