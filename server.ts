@@ -16,6 +16,21 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 
+/**
+ * Helper isomorfo para leitura de variáveis de ambiente
+ */
+const getEnv = (key: string): string => {
+  if (typeof process !== 'undefined' && process.env && process.env[key]) {
+    return process.env[key] as string;
+  }
+  try {
+    if (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env[key]) {
+      return (import.meta as any).env[key] as string;
+    }
+  } catch (e) {}
+  return '';
+};
+
 async function setupServer() {
   // Inicia workers de segundo plano
   iniciarMonitoramentoSaidaMeta();
@@ -24,7 +39,7 @@ async function setupServer() {
 
   // Initialize Gemini
   const ai = new GoogleGenAI({ 
-    apiKey: process.env.GEMINI_API_KEY,
+    apiKey: getEnv('GEMINI_API_KEY'),
     httpOptions: {
       headers: {
         'User-Agent': 'aistudio-build',
@@ -114,7 +129,7 @@ async function setupServer() {
     const challenge = req.query["hub.challenge"];
 
     if (mode && token) {
-      if (mode === "subscribe" && token === process.env.META_VERIFY_TOKEN) {
+      if (mode === "subscribe" && token === getEnv('META_VERIFY_TOKEN')) {
         console.log("[Webhook Meta] Verificado com sucesso!");
         res.status(200).send(challenge);
       } else {

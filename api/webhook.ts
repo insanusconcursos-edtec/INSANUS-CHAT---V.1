@@ -6,8 +6,22 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 /**
+ * Helper isomorfo para leitura de variáveis de ambiente
+ */
+const getEnv = (key: string): string => {
+  if (typeof process !== 'undefined' && process.env && process.env[key]) {
+    return process.env[key] as string;
+  }
+  try {
+    if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) {
+      return import.meta.env[key] as string;
+    }
+  } catch (e) {}
+  return '';
+};
+
+/**
  * Handler Fail-Safe para Webhook da Meta e APIs do sistema na Vercel
- * Estrutura otimizada para handshake ultrarrápido (GET)
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { method, query } = req;
@@ -19,7 +33,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const token = query['hub.verify_token'];
     const challenge = query['hub.challenge'];
 
-    if (mode === 'subscribe' && token === process.env.META_VERIFY_TOKEN) {
+    if (mode === 'subscribe' && token === getEnv('META_VERIFY_TOKEN')) {
       console.log('✅ WEBHOOK_VERIFIED');
       // Meta exige o challenge puro como texto
       return res.status(200).send(challenge);
@@ -42,10 +56,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         
         // --- MAPEAMENTO MULTICANAL ---
         const getMetaToken = (id: string) => {
-          if (id === process.env.META_PAGE_ID_INSANUS) return process.env.META_TOKEN_INSANUS;
-          if (id === process.env.META_PAGE_ID_GABARITO) return process.env.META_TOKEN_GABARITO;
-          if (id === process.env.META_PAGE_ID_ENEM) return process.env.META_TOKEN_ENEM;
-          return process.env.META_ACCESS_TOKEN; // Fallback
+          if (id === getEnv('META_PAGE_ID_INSANUS')) return getEnv('META_TOKEN_INSANUS');
+          if (id === getEnv('META_PAGE_ID_GABARITO')) return getEnv('META_TOKEN_GABARITO');
+          if (id === getEnv('META_PAGE_ID_ENEM')) return getEnv('META_TOKEN_ENEM');
+          return getEnv('META_ACCESS_TOKEN'); // Fallback
         };
 
         // WhatsApp
@@ -96,7 +110,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { GoogleGenAI } = await import("@google/genai");
         const { texto, historico, sistemaPrompt } = body;
         const ai = new GoogleGenAI({ 
-          apiKey: process.env.GEMINI_API_KEY || '',
+          apiKey: getEnv('GEMINI_API_KEY'),
           httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
         });
         const result = await ai.models.generateContent({
@@ -118,7 +132,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { GoogleGenAI, Type } = await import("@google/genai");
         const { texto } = body;
         const ai = new GoogleGenAI({ 
-          apiKey: process.env.GEMINI_API_KEY || '',
+          apiKey: getEnv('GEMINI_API_KEY'),
           httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
         });
 

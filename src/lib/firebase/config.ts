@@ -8,10 +8,20 @@ import { getFirestore, enableIndexedDbPersistence } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 
 const getEnv = (key: string): string => {
-  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) {
-    return import.meta.env[key] as string;
+  // Check Node environment (process.env) first for Serverless/CJS
+  if (typeof process !== 'undefined' && process.env && process.env[key]) {
+    return process.env[key] as string;
   }
-  return (process.env[key] as string) || '';
+  // Check Vite environment (import.meta.env) for Frontend
+  // Using a try-catch or cautious check to avoid CJS build errors
+  try {
+    if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) {
+      return import.meta.env[key] as string;
+    }
+  } catch (e) {
+    // import.meta might throw or be problematic in some CJS environments
+  }
+  return '';
 };
 
 const firebaseConfig = {
