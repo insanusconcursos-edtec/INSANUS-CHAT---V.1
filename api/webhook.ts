@@ -71,9 +71,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         // WhatsApp
         if (bodyValue.object === "whatsapp_business_account") {
-          // Respond immediately to prevent retries
-          if (!res.headersSent) res.status(200).send('EVENT_RECEIVED');
-
           for (const entry of bodyValue.entry || []) {
             for (const change of entry.changes || []) {
               if (change.value.messages) {
@@ -87,22 +84,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   const texto = msg.text?.body || (msg.type !== 'text' ? `[Mensagem do tipo ${msg.type}]` : "Mensagem vazia");
                   const nomeCliente = change.value.contacts?.[0]?.profile?.name || contato;
 
-                  // Execute in background
-                  processarEventoWhatsApp(contato, texto, nomeCliente, phoneId, token).catch(e => 
+                  console.log(`[WhatsApp] Processando mensagem de ${contato} síncronamente...`);
+                  await processarEventoWhatsApp(contato, texto, nomeCliente, phoneId, token).catch(e => 
                     console.error("[WhatsApp Error]:", e)
                   );
                 }
               }
             }
           }
-          return;
+          console.log("[WhatsApp] Evento processado com sucesso. Enviando 200 OK.");
+          return res.status(200).send('EVENT_RECEIVED');
         }
 
         // Instagram
         if (bodyValue.object === "instagram") {
-          // Respond immediately to prevent retries
-          if (!res.headersSent) res.status(200).send('EVENT_RECEIVED');
-
           for (const entry of bodyValue.entry || []) {
             const pageId = entry.id; // ID da conta Instagram/Página Facebook
             const token = getMetaToken(pageId);
@@ -120,15 +115,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
               const texto = msgObj.message?.text || "[Instagram Media/Interaction]";
               
-              console.log(`[Instagram Message] Sender: ${senderId}, Recipient: ${recipientId}, Text: ${texto}`);
+              console.log(`[Instagram] Processando mensagem de ${senderId} síncronamente...`);
 
-              // Execute in background
-              processarEventoInstagram(senderId, texto, pageId, token).catch(e => 
+              await processarEventoInstagram(senderId, texto, pageId, token).catch(e => 
                 console.error("[Instagram Error]:", e)
               );
             }
           }
-          return;
+          console.log("[Instagram] Evento processado com sucesso. Enviando 200 OK.");
+          return res.status(200).send('EVENT_RECEIVED');
         }
       }
 
@@ -235,22 +230,15 @@ async function processarEventoInstagram(senderId: string, texto: string, pageId:
     const { doc, updateDoc } = await import("firebase/firestore");
     const { db } = await import("../src/lib/firebase/config.js");
 
-    console.log(`[Instagram Debug] Buscando chat para senderId: ${senderId}...`);
-    let chat = null;
-    try {
-      chat = await buscarChatPorContato(senderId, 'instagram');
-      console.log(`[Instagram Debug] Resultado busca chat: ${chat ? 'Encontrado ' + chat.id + ' (Nome: ' + chat.clienteNome + ')' : 'Não encontrado'}`);
-    } catch (searchError) {
-      console.error("[Instagram Debug] Erro ao buscar chat:", searchError);
-    }
+    console.log(`[Instagram Debug] Início do processamento para ${senderId}`);
 
-    let nomeCliente = chat?.clienteNome || `IG User ${senderId.slice(-4)}`;
-    let fotoCliente = chat?.clienteFoto || '';
+    // d) fetch na Graph API (Perfil)
+    let nomeCliente = `IG User ${senderId.slice(-4)}`;
+    let fotoCliente = '';
 
-    // Sempre tenta buscar perfil real do Instagram se for nome genérico ou novo chat
-    if (token && (nomeCliente.startsWith('IG User') || !chat)) {
+    if (token) {
       try {
-        console.log(`[Instagram Debug] Buscando perfil real na Graph API v25.0...`);
+        console.log(`[Instagram Debug] a) Fetching profile real na Graph API v25.0...`);
         const profileRes = await fetch(`https://graph.facebook.com/v25.0/${senderId}?fields=name,profile_pic&access_token=${token}`);
         if (profileRes.ok) {
           const profileData = await profileRes.json();
@@ -258,17 +246,28 @@ async function processarEventoInstagram(senderId: string, texto: string, pageId:
           if (profileData.profile_pic) fotoCliente = profileData.profile_pic;
           console.log(`[Instagram Debug] Perfil encontrado: ${nomeCliente}`);
         } else {
-          console.warn(`[Instagram Debug] Erro ao buscar perfil (Graph API): ${profileRes.status}`);
+          console.warn(`[Instagram Debug] Falha ao buscar perfil (Graph API): ${profileRes.status}`);
         }
       } catch (e) {
         console.error('[Instagram Profile Error]', e);
       }
     }
 
+    // b) busca do chat no Firestore
+    console.log(`[Instagram Debug] b) Buscando chat no Firestore...`);
+    let chat = null;
+    try {
+      chat = await buscarChatPorContato(senderId, 'instagram');
+      console.log(`[Instagram Debug] Resultado busca chat: ${chat ? 'Encontrado ' + chat.id : 'Não encontrado'}`);
+    } catch (searchError) {
+      console.error("[Instagram Debug] Erro ao buscar chat:", searchError);
+    }
+
     let chatId = chat?.id;
 
+    // c) criação ou atualização e gravação da mensagem
     if (!chatId) {
-      console.log(`[Instagram Debug] Criando novo chat para: ${senderId}`);
+      console.log(`[Instagram Debug] c) Criando novo chat...`);
       chatId = await criarNovoChat({
         clienteNome: nomeCliente,
         clienteTelefone: senderId,
@@ -278,26 +277,26 @@ async function processarEventoInstagram(senderId: string, texto: string, pageId:
         origemId: pageId, 
         clienteFoto: fotoCliente
       });
-      console.log(`[Instagram Debug] Novo chat criado. ID: ${chatId}`);
-    } else if (nomeCliente !== chat.clienteNome) {
-      // Atualiza o nome se foi encontrado um real
+      console.log(`[Instagram Debug] Novo chat criado: ${chatId}`);
+    } else if (nomeCliente !== chat.clienteNome && !nomeCliente.startsWith('IG User')) {
+      console.log(`[Instagram Debug] c) Atualizando dados do cliente...`);
       try {
         await updateDoc(doc(db, 'chats', chatId), {
           clienteNome: nomeCliente,
           clienteFoto: fotoCliente
         });
-        console.log(`[Instagram Debug] Dados do chat atualizados para: ${nomeCliente}`);
+        console.log(`[Instagram Debug] Firebase atualizado para: ${nomeCliente}`);
       } catch (e) {
-        console.warn(`[Instagram Debug] Falha ao atualizar dados do chat:`, e);
+        console.warn(`[Instagram Debug] Falha ao atualizar dados:`, e);
       }
     }
 
     if (chatId) {
-      console.log(`[Instagram Debug] A TENTAR GUARDAR MENSAGEM NO FIRESTORE (ChatID: ${chatId})...`);
+      console.log(`[Instagram Debug] c) Gravando mensagem no Firestore...`);
       await salvarMensagem(chatId, 'cliente', texto);
       console.log(`[Instagram Debug] ✅ MENSAGEM GUARDADA COM SUCESSO. ChatID: ${chatId}`);
     } else {
-      console.warn(`[Instagram Warning] Falha ao obter ChatID para ${senderId}`);
+      console.warn(`[Instagram Warning] Falha ao obter ChatID.`);
     }
   } catch (error) {
     console.error('ERRO CRÍTICO NO PROCESSAMENTO INSTAGRAM:', error);
