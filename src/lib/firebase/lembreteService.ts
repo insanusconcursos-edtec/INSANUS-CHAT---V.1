@@ -14,9 +14,9 @@ import {
   Timestamp,
   orderBy
 } from 'firebase/firestore';
-import { db } from './config';
-import { handleFirestoreError, OperationType } from './errors';
-import { onSnapshotWithRetry } from './listeners';
+import { db } from './config.js';
+import { handleFirestoreError, OperationType } from './errors.js';
+import { onSnapshotWithRetry } from './listeners.js';
 import type { Lembrete, PrioridadeLembrete, AntecedenciaLembrete } from '@/src/types';
 
 /**

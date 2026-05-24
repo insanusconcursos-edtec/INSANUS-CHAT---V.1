@@ -168,7 +168,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
  * Funções auxiliares com importações dinâmicas para isolar o Firebase
  */
 async function processarEventoWhatsApp(contato: string, texto: string, nomeCliente: string, phoneId: string | undefined, token: string | undefined) {
-  const { buscarChatPorContato, salvarMensagem, criarNovoChat } = await import("../src/lib/firebase/services");
+  const { buscarChatPorContato, salvarMensagem, criarNovoChat } = await import("../src/lib/firebase/services.js");
   
   let chat = await buscarChatPorContato(contato, 'whatsapp');
   let chatId = chat?.id;
@@ -193,7 +193,7 @@ async function processarEventoWhatsApp(contato: string, texto: string, nomeClien
 }
 
 async function processarEventoInstagram(senderId: string, texto: string, pageId: string | undefined, token: string | undefined) {
-  const { buscarChatPorContato, salvarMensagem, criarNovoChat } = await import("../src/lib/firebase/services");
+  const { buscarChatPorContato, salvarMensagem, criarNovoChat } = await import("../src/lib/firebase/services.js");
 
   let chat = await buscarChatPorContato(senderId, 'instagram');
   let chatId = chat?.id;

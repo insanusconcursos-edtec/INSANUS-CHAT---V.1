@@ -4,9 +4,9 @@
  */
 
 import { doc, updateDoc, serverTimestamp, collection, addDoc } from 'firebase/firestore';
-import { db } from './config';
-import { handleFirestoreError, OperationType } from './errors';
-import { SYSTEM_PROMPT_VENDAS } from './iaPromptVendas';
+import { db } from './config.js';
+import { handleFirestoreError, OperationType } from './errors.js';
+import { SYSTEM_PROMPT_VENDAS } from './iaPromptVendas.js';
 import type { Mensagem } from '@/src/types';
 
 /**

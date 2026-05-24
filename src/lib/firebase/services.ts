@@ -13,8 +13,8 @@ import {
   getDoc,
   getDocFromServer
 } from 'firebase/firestore';
-import { db } from './config';
-import { handleFirestoreError, OperationType } from './errors';
+import { db } from './config.js';
+import { handleFirestoreError, OperationType } from './errors.js';
 import type { Chat, Mensagem, EtapaFunil, CanalAtendimento, RemetenteMensagem } from '@/src/types';
 
 /**

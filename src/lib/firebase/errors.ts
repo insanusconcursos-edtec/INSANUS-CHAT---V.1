@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { auth } from './config';
+import { auth } from './config.js';
 
 export enum OperationType {
   CREATE = 'create',

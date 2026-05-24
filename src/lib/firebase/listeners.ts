@@ -15,8 +15,8 @@ import {
   Query,
   QuerySnapshot
 } from 'firebase/firestore';
-import { db } from './config';
-import { handleFirestoreError, OperationType } from './errors';
+import { db } from './config.js';
+import { handleFirestoreError, OperationType } from './errors.js';
 import type { Mensagem, Chat, Usuario } from '@/src/types';
 
 /**

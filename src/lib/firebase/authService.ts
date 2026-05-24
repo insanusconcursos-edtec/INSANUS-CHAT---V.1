@@ -12,8 +12,8 @@ import {
   User
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, getDocs, query, orderBy } from 'firebase/firestore';
-import { auth, db } from './config';
-import { atualizarStatusUsuario } from './statusService';
+import { auth, db } from './config.js';
+import { atualizarStatusUsuario } from './statusService.js';
 import type { Usuario } from '@/src/types';
 
 /**

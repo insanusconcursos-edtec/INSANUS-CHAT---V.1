@@ -4,8 +4,8 @@
  */
 
 import { collection, query, where, onSnapshot, limit, orderBy } from 'firebase/firestore';
-import { db } from '../firebase/config';
-import { enviarMensagemPeloCanal } from './metaApiService';
+import { db } from '../firebase/config.js';
+import { enviarMensagemPeloCanal } from './metaApiService.js';
 import { doc, getDoc } from 'firebase/firestore';
 
 /**

@@ -14,7 +14,7 @@ import {
   updateDoc, 
   serverTimestamp 
 } from 'firebase/firestore';
-import { db } from './config';
+import { db } from './config.js';
 
 /**
  * Distribui um novo lead seguindo a lógica de Fila Circular (Round-Robin)

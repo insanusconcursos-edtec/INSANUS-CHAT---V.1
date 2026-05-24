@@ -8,7 +8,7 @@ import {
   updateDoc, 
   serverTimestamp 
 } from 'firebase/firestore';
-import { db } from './config';
+import { db } from './config.js';
 
 /**
  * Atualiza o status de disponibilidade do usuário

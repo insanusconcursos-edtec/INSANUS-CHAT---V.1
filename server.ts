@@ -8,8 +8,8 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
-import { buscarChatPorContato, salvarMensagem, criarNovoChat } from "./src/lib/firebase/services";
-import { iniciarMonitoramentoSaidaMeta } from "./src/lib/meta/metaWorker";
+import { buscarChatPorContato, salvarMensagem, criarNovoChat } from "./src/lib/firebase/services.js";
+import { iniciarMonitoramentoSaidaMeta } from "./src/lib/meta/metaWorker.js";
 
 dotenv.config();
 

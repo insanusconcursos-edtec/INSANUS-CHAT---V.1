@@ -4,10 +4,10 @@
  */
 
 import { collection, query, where, onSnapshot, limit, orderBy, getDocs, doc, updateDoc, Timestamp } from 'firebase/firestore';
-import { db } from './config';
-import { processarTriagemMensagem, triagemAvancadaGemini } from './iaService';
-import { gerarRespostaVendedorVirtual } from './iaAgenteVendasService';
-import { onSnapshotWithRetry } from './listeners';
+import { db } from './config.js';
+import { processarTriagemMensagem, triagemAvancadaGemini } from './iaService.js';
+import { gerarRespostaVendedorVirtual } from './iaAgenteVendasService.js';
+import { onSnapshotWithRetry } from './listeners.js';
 
 /**
  * Worker que monitora novos chats e executa a triagem automática.

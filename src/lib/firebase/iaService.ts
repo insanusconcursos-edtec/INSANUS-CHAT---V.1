@@ -4,9 +4,9 @@
  */
 
 import { doc, updateDoc, serverTimestamp, collection, addDoc } from 'firebase/firestore';
-import { db } from './config';
-import { handleFirestoreError, OperationType } from './errors';
-import { distribuirNovoLead } from './distribuicaoService';
+import { db } from './config.js';
+import { handleFirestoreError, OperationType } from './errors.js';
+import { distribuirNovoLead } from './distribuicaoService.js';
 
 // Mapeamento de Setores e IDs
 const SETORES_MAP = {

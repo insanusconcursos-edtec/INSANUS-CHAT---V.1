@@ -13,7 +13,7 @@ import {
   collection, 
   writeBatch 
 } from 'firebase/firestore';
-import { auth, db } from './config';
+import { auth, db } from './config.js';
 import type { Usuario } from '@/src/types';
 
 /**
