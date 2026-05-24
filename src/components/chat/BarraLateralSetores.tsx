@@ -3,8 +3,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useMemo } from 'react';
-import { LayoutGrid, TrendingUp, DollarSign, GraduationCap, AlertCircle } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { 
+  LayoutGrid, 
+  TrendingUp, 
+  DollarSign, 
+  GraduationCap, 
+  AlertCircle,
+  MessageCircle,
+  Instagram,
+  ChevronDown,
+  ChevronRight,
+  Monitor
+} from 'lucide-react';
 import { useAuth } from '@/src/context/AuthContext';
 
 interface Sector {
@@ -21,9 +32,16 @@ const SETORES_LIST: Sector[] = [
   { id: 'pedagogico-id', nome: 'Suporte Pedagógico', icon: <GraduationCap size={18} /> },
 ];
 
+interface CanalFilter {
+  type: 'all' | 'whatsapp' | 'instagram';
+  brand?: string;
+}
+
 interface BarraLateralSetoresProps {
   selectedSectorId: string;
   onSelectSector: (id: string) => void;
+  selectedChannel: CanalFilter;
+  onSelectChannel: (filter: CanalFilter) => void;
   unansweredCount?: number;
   triageCount?: number;
 }
@@ -31,10 +49,13 @@ interface BarraLateralSetoresProps {
 export default function BarraLateralSetores({ 
   selectedSectorId, 
   onSelectSector,
+  selectedChannel,
+  onSelectChannel,
   unansweredCount = 0,
   triageCount = 0
 }: BarraLateralSetoresProps) {
   const { userData } = useAuth();
+  const [isInstagramExpanded, setIsInstagramExpanded] = useState(true);
 
   const setoresPermitidos = useMemo(() => {
     if (!userData) return [];
@@ -57,11 +78,12 @@ export default function BarraLateralSetores({
   return (
     <div className="w-64 bg-slate-50 border-r border-slate-200 flex flex-col h-full overflow-y-auto">
       <div className="p-6">
+        {/* SEÇÃO: SETORES */}
         <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-6">
           Setores e Filtros
         </h2>
         
-        <nav className="space-y-1">
+        <nav className="space-y-1 mb-8">
           {setoresPermitidos.map((sector) => (
             <button
               key={sector.id}
@@ -86,6 +108,84 @@ export default function BarraLateralSetores({
               )}
             </button>
           ))}
+        </nav>
+
+        {/* SEÇÃO: CANAIS */}
+        <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-6">
+          Canais
+        </h2>
+
+        <nav className="space-y-1">
+          {/* Todos os Canais */}
+          <button
+            onClick={() => onSelectChannel({ type: 'all' })}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
+              selectedChannel.type === 'all'
+              ? 'bg-white shadow-sm border border-slate-200 text-indigo-600'
+              : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'
+            }`}
+          >
+            <Monitor size={18} className={selectedChannel.type === 'all' ? 'text-indigo-600' : 'text-slate-400'} />
+            <span className="text-sm font-bold tracking-tight">Todos os Canais</span>
+          </button>
+
+          {/* WhatsApp */}
+          <button
+            onClick={() => onSelectChannel({ type: 'whatsapp' })}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
+              selectedChannel.type === 'whatsapp'
+              ? 'bg-white shadow-sm border border-slate-200 text-emerald-600'
+              : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'
+            }`}
+          >
+            <MessageCircle size={18} className={selectedChannel.type === 'whatsapp' ? 'text-emerald-500' : 'text-slate-400'} />
+            <span className="text-sm font-bold tracking-tight">WhatsApp</span>
+          </button>
+
+          {/* Instagram (Expansível) */}
+          <div className="space-y-1">
+            <button
+              onClick={() => {
+                if (selectedChannel.type !== 'instagram') {
+                  onSelectChannel({ type: 'instagram' });
+                }
+                setIsInstagramExpanded(!isInstagramExpanded);
+              }}
+              className={`w-full flex items-center justify-between px-4 py-3 rounded-xl transition-all ${
+                selectedChannel.type === 'instagram' && !selectedChannel.brand
+                ? 'bg-white shadow-sm border border-slate-200 text-pink-600'
+                : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <Instagram size={18} className={selectedChannel.type === 'instagram' ? 'text-pink-500' : 'text-slate-400'} />
+                <span className="text-sm font-bold tracking-tight">Instagram</span>
+              </div>
+              {isInstagramExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            </button>
+
+            {isInstagramExpanded && (
+              <div className="ml-4 pl-4 border-l border-slate-200 space-y-1 py-1">
+                {[
+                  { brand: 'insanus', label: 'IG: Insanus' },
+                  { brand: 'gabarito', label: 'IG: Gabarito' },
+                  { brand: 'enem', label: 'IG: ENEM' }
+                ].map(item => (
+                  <button
+                    key={item.brand}
+                    onClick={() => onSelectChannel({ type: 'instagram', brand: item.brand })}
+                    className={`w-full text-left px-3 py-2 rounded-lg text-[11px] font-black uppercase tracking-widest transition-all ${
+                      selectedChannel.brand === item.brand
+                      ? 'bg-pink-50 text-pink-600'
+                      : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </nav>
 
         <div className="mt-12 bg-indigo-600 rounded-2xl p-5 text-white shadow-lg shadow-indigo-200 relative overflow-hidden group">

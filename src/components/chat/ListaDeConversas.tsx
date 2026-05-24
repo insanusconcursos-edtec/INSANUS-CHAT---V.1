@@ -68,9 +68,21 @@ export default function ListaDeConversas({
 
           <div className="flex-1 min-w-0">
             <div className="flex justify-between items-start mb-1">
-              <h3 className={`text-sm font-black truncate tracking-tight ${selectedChatId === chat.id ? 'text-indigo-900' : 'text-slate-800'}`}>
-                {chat.clienteNome}
-              </h3>
+              <div className="flex flex-col gap-0.5 min-w-0">
+                <h3 className={`text-sm font-black truncate tracking-tight ${selectedChatId === chat.id ? 'text-indigo-900' : 'text-slate-800'}`}>
+                  {chat.clienteNome}
+                </h3>
+                {chat.canal === 'instagram' && chat.origemId && (
+                  <span className={`text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded w-fit ${
+                    chat.origemId === 'insanus' ? 'bg-indigo-50 text-indigo-500' :
+                    chat.origemId === 'gabarito' ? 'bg-emerald-50 text-emerald-500' :
+                    chat.origemId === 'enem' ? 'bg-pink-50 text-pink-500' :
+                    'bg-slate-50 text-slate-500'
+                  }`}>
+                    {chat.origemId}
+                  </span>
+                )}
+              </div>
               <span className="text-[10px] font-bold text-slate-400 font-mono">
                 {chat.dataUltimaMensagem instanceof Date 
                   ? chat.dataUltimaMensagem.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })

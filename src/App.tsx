@@ -51,6 +51,7 @@ function MainContent() {
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [filterSectorId, setFilterSectorId] = useState('all');
+  const [filterChannel, setFilterChannel] = useState<{ type: 'all' | 'whatsapp' | 'instagram'; brand?: string }>({ type: 'all' });
   const [lembretesPop, setLembretesPop] = useState<any[]>([]);
   const [showAgenda, setShowAgenda] = useState(false);
   const [activeView, setActiveView] = useState<'chat' | 'campaigns' | 'playground' | 'team'>('chat');
@@ -100,11 +101,24 @@ function MainContent() {
   // Memórias para as listas filtradas
   const filteredChats = useMemo(() => {
     let list = chats;
+    
+    // Filtro por Setor
     if (filterSectorId !== 'all') {
-      list = chats.filter(c => c.setorId === filterSectorId);
+      list = list.filter(c => c.setorId === filterSectorId);
     }
+    
+    // Filtro por Canal
+    if (filterChannel.type !== 'all') {
+      list = list.filter(c => c.canal === filterChannel.type);
+      
+      // Filtro por Marca (Instagram)
+      if (filterChannel.type === 'instagram' && filterChannel.brand) {
+        list = list.filter(c => c.origemId === filterChannel.brand);
+      }
+    }
+    
     return list;
-  }, [chats, filterSectorId]);
+  }, [chats, filterSectorId, filterChannel]);
 
   const selectedChat = useMemo(() => 
     chats.find(c => c.id === selectedChatId) || null
@@ -239,6 +253,8 @@ function MainContent() {
             <BarraLateralSetores 
               selectedSectorId={filterSectorId}
               onSelectSector={setFilterSectorId}
+              selectedChannel={filterChannel}
+              onSelectChannel={setFilterChannel}
               unansweredCount={unansweredCount}
               triageCount={triageCount}
             />
