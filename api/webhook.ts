@@ -105,6 +105,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             console.log(`[Instagram Payload] PageID: ${pageId}, Token found: ${token ? 'YES' : 'NO'}`);
 
             for (const msgObj of entry.messaging || []) {
+              // Ignorar ecos (mensagens enviadas pela própria página)
+              if (msgObj.message?.is_echo) {
+                console.log("[Instagram] Echo ignorado.");
+                return res.status(200).send("Echo ignorado");
+              }
+
               const senderId = msgObj.sender?.id;
               const recipientId = msgObj.recipient?.id;
               
