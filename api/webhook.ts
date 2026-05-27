@@ -277,47 +277,78 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               console.log(`[API Chat] Gravando mensagem no Firestore p/ chat ${chatId}`);
               await salvarMensagem(chatId, 'ia', respostaFinal);
               
-              // Marcar como respondido se sucesso
-              if (respostaFinal !== fallbackResponse) {
-                await updateDoc(doc(db, 'chats', chatId), {
-                  iaStatus: 'respondido',
-                  updatedAt: serverTimestamp()
-                });
-              }
-              
-              // Envio para o Instagram (Graph API)
-              if (chatData && chatData.canal === 'instagram' && chatData.clienteTelefone && chatData.origemId) {
+              // Envio Outbound para a Meta (Graph API)
+              let envioMetaSucesso = false;
+
+              if (chatData && chatData.clienteTelefone && chatData.origemId) {
                 try {
                   const pageId = chatData.origemId;
                   const senderId = chatData.clienteTelefone;
-                  const token = getMetaToken(pageId);
+                  const token = getMetaToken(pageId); // Page Access Token
 
                   if (token) {
-                    console.log(`[API Chat] Enviando outbound Meta (me/messages) para ${senderId}...`);
-                    const metaRes = await fetch(`https://graph.facebook.com/v25.0/me/messages`, {
+                    console.log("[API Chat] Enviando outbound Meta...");
+                    
+                    let metaUrl = `https://graph.facebook.com/v25.0/me/messages`;
+                    let metaBody: any = {
+                      recipient: { id: senderId },
+                      message: { text: respostaFinal }
+                    };
+
+                    // Lógica adicional para suportar disparos no WhatsApp (opcional)
+                    if (chatData.canal === 'whatsapp') {
+                      metaUrl = `https://graph.facebook.com/v25.0/${pageId}/messages`;
+                      metaBody = {
+                        messaging_product: "whatsapp",
+                        to: senderId,
+                        type: "text",
+                        text: { body: respostaFinal }
+                      };
+                    }
+
+                    const metaRes = await fetch(metaUrl, {
                       method: 'POST',
                       headers: {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${token}`
                       },
-                      body: JSON.stringify({
-                        recipient: { id: senderId },
-                        message: { text: respostaFinal }
-                      })
+                      body: JSON.stringify(metaBody)
                     });
 
                     if (metaRes.ok) {
-                      console.log(`[API Chat] ✅ Resposta entregue no Instagram.`);
+                      console.log(`[API Chat] ✅ Resposta entregue com sucesso na Meta.`);
+                      envioMetaSucesso = true;
                     } else {
                       const errorData = await metaRes.json();
-                      console.error(`[API Chat] ❌ Falha Meta (Status ${metaRes.status}):`, JSON.stringify(errorData));
-                      console.log(`[Meta Bypass] Erro de envio capturado, mas resposta já salva no Firestore.`);
+                      const errorStr = JSON.stringify(errorData);
+                      console.error(`[API Chat] ❌ Falha Meta (Status ${metaRes.status}):`, errorStr);
+                      // Destravar chat para permitir novas tentativas na interface se falhar
+                      await updateDoc(doc(db, 'chats', chatId), {
+                        iaStatus: 'erro',
+                        ultimoErroIA: 'Falha no outbound Meta: ' + (errorData.error?.message || errorStr),
+                        updatedAt: serverTimestamp()
+                      });
                     }
+                  } else {
+                    console.warn(`[API Chat] Token não encontrado para originId ${pageId}.`);
                   }
-                } catch (metaError) {
-                  console.error(`[API Chat] Erro na requisição Meta:`, metaError);
-                  console.log(`[Meta Bypass] Exceção no envio capturada, mas resposta já salva no Firestore.`);
+                } catch (metaError: any) {
+                  console.error(`[API Chat] Erro na requisição outbound Meta:`, metaError);
+                  await updateDoc(doc(db, 'chats', chatId), {
+                    iaStatus: 'erro',
+                    ultimoErroIA: 'Erro HTTP no outbound Meta: ' + metaError?.message,
+                    updatedAt: serverTimestamp()
+                  });
                 }
+              }
+
+              // Somente após o sucesso no envio, mude o 'iaStatus' no Firestore para 'respondido'
+              if (envioMetaSucesso && respostaFinal !== fallbackResponse) {
+                await updateDoc(doc(db, 'chats', chatId), {
+                  iaStatus: 'respondido',
+                  updatedAt: serverTimestamp()
+                });
+                console.log(`[API Chat] Status do chat ${chatId} atualizado para 'respondido' após sucesso no outbound.`);
               }
             } catch (postError) {
               console.error("[API Chat] Erro no processamento pós-geração:", postError);
