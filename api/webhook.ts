@@ -166,31 +166,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         try {
           let chatData: any = null;
 
-          // Idempotência e busca de metadados com Lock Atômico no Firestore
+          // Idempotência e busca de metadados com Lock Atômico via Transação Atômica
           if (chatId) {
             try {
-              const { getDoc, doc, updateDoc, serverTimestamp } = await import("firebase/firestore");
+              const { runTransaction, doc, serverTimestamp } = await import("firebase/firestore");
               const { db } = await import("../src/lib/firebase/config.js");
               const chatRef = doc(db, 'chats', chatId);
-              const chatSnap = await getDoc(chatRef);
-              
-              if (chatSnap.exists()) {
+
+              await runTransaction(db, async (transaction) => {
+                const chatSnap = await transaction.get(chatRef);
+                if (!chatSnap.exists()) return;
+                
                 chatData = chatSnap.data();
-                // Verificação Rigorosa no Firestore (Segundo nível de defesa)
-                if (chatData.iaStatus === 'processando' || chatData.iaStatus === 'respondido') {
-                  console.log(`[API Chat] Chat ${chatId} com status "${chatData.iaStatus}". Ignorando duplicado.`);
-                  return res.status(200).json({ message: "Ignorando duplicado em andamento" });
+                // Verificação Rigorosa: Só prossegue se for 'novo'
+                if (chatData.iaStatus !== 'novo') {
+                  throw new Error('DUPLICATE_REQUEST');
                 }
                 
-                // Trava Simultânea Imediata (Lock Atômico no DB)
-                await updateDoc(chatRef, { 
+                // Reserva o chat mudando para 'processando' IMEDIATAMENTE e atomicamente
+                transaction.update(chatRef, { 
                   iaStatus: 'processando',
                   updatedAt: serverTimestamp()
                 });
-                console.log(`[API Chat] Lock atômico ativo para ${chatId} (iaStatus: processando)`);
+              });
+              console.log(`[API Chat] Lock atômico via Transação concluído para ${chatId}`);
+            } catch (e: any) {
+              if (e.message === 'DUPLICATE_REQUEST') {
+                console.log(`[API Chat] Requisição duplicada bloqueada na Transação para ${chatId}.`);
+                return res.status(200).json({ message: "Duplicado bloqueado na transação" });
               }
-            } catch (e) {
-              console.error("[API Chat] Erro ao aplicar lock atômico:", e);
+              console.error("[API Chat] Erro ao aplicar transação de lock:", e);
             }
           }
 
