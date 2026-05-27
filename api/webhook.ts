@@ -134,21 +134,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         
         let chatData: any = null;
 
-        // Idempotência e busca de metadados
+        // Idempotência e busca de metadados com Lock Atômico
         if (chatId) {
           try {
-            const { getDoc, doc } = await import("firebase/firestore");
+            const { getDoc, doc, updateDoc, serverTimestamp } = await import("firebase/firestore");
             const { db } = await import("../src/lib/firebase/config.js");
-            const chatSnap = await getDoc(doc(db, 'chats', chatId));
+            const chatRef = doc(db, 'chats', chatId);
+            const chatSnap = await getDoc(chatRef);
+            
             if (chatSnap.exists()) {
               chatData = chatSnap.data();
-              // A trava de segurança simplificada: 
-              // Se iaStatus for 'novo', 'pendente' ou 'respondido' (resetado por nova msg), permitimos prosseguir.
-              // O status 'processando' é gerido pelo Worker que chama esta API, por isso não bloqueamos aqui
-              // para evitar que a API bloqueie a si mesma.
+              // 2. Verificação Rigorosa
+              if (chatData.iaStatus === 'processando' || chatData.iaStatus === 'respondido') {
+                console.log(`[API Chat] Chat ${chatId} com status "${chatData.iaStatus}". Ignorando duplicado.`);
+                return res.status(200).json({ message: "Ignorando duplicado em andamento" });
+              }
+              
+              // 1. Trava Simultânea Imediata (Lock Atômico)
+              await updateDoc(chatRef, { 
+                iaStatus: 'processando',
+                updatedAt: serverTimestamp()
+              });
+              console.log(`[API Chat] Lock atômico ativo para ${chatId} (iaStatus: processando)`);
             }
           } catch (e) {
-            console.error("[API Chat] Erro ao verificar idempotência/chat:", e)
+            console.error("[API Chat] Erro ao aplicar lock atômico:", e);
           }
         }
 
@@ -239,8 +249,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               const token = getMetaToken(pageId);
 
               if (token) {
-                console.log(`[API Chat] Enviando outbound Meta para ${senderId}...`);
-                const metaRes = await fetch(`https://graph.facebook.com/v25.0/${pageId}/messages`, {
+                console.log(`[API Chat] Enviando outbound Meta (me/messages) para ${senderId}...`);
+                const metaRes = await fetch(`https://graph.facebook.com/v25.0/me/messages`, {
                   method: 'POST',
                   headers: {
                     'Content-Type': 'application/json',
