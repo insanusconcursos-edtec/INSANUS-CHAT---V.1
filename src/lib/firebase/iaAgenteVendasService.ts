@@ -39,23 +39,13 @@ export async function gerarRespostaVendedorVirtual(chatId: string, historico: Me
 
     const { resposta } = await response.json();
 
-    // 3. Salva a resposta da IA no Firestore
-    await addDoc(collection(db, 'chats', chatId, 'mensagens'), {
-      chatId,
-      remetente: 'ia',
-      texto: resposta,
-      timestamp: serverTimestamp(),
-    });
-
-    // 4. Limpa o status de processamento e atualiza metadados
+    // 3. Atualiza metadados do chat (A mensagem já foi salva pelo próprio endpoint /api/chat)
     await updateDoc(chatRef, {
-      iaStatus: 'respondido',
       statusEtapa: 'negociacao', // IA assume que iniciou a negociação
-      updatedAt: serverTimestamp(),
-      semRespostaDesde: null // IA respondeu, então reseta o alerta
+      updatedAt: serverTimestamp()
     });
 
-    console.log(`[IA Sales] Resposta gerada para chat ${chatId}`);
+    console.log(`[IA Sales] Resposta gerada via API p/ chat ${chatId}`);
     return resposta;
 
   } catch (error) {

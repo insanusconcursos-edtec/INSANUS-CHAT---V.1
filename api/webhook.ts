@@ -149,7 +149,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               }
             }
           } catch (e) {
-            console.error("[API Chat] Erro ao verificar idempotência/chat:", e);
+            console.error("[API Chat] Erro ao verificar idempotência/chat:", e)
           }
         }
 
@@ -165,27 +165,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
           });
 
-          const history = (historico || []).map((h: any) => ({ 
-            role: h.remetente === 'cliente' ? 'user' : 'model', 
-            parts: [{ text: h.texto }] 
+          // 1. Mapeamento do Histórico conforme solicitado
+          // Removemos a última mensagem do histórico se ela for igual ao 'texto' atual para evitar repetição no prompt
+          const rawHistory = (historico || []);
+          const historyForMapping = rawHistory.length > 0 && rawHistory[rawHistory.length -1].texto === texto 
+            ? rawHistory.slice(0, -1) 
+            : rawHistory;
+
+          const googleHistory = historyForMapping.map((msg: any) => ({
+            role: (msg.remetente === 'cliente' || msg.remetente === 'usuario') ? 'user' : 'model',
+            parts: [{ text: msg.texto || "" }]
           }));
 
-          console.log(`[API Chat] A chamar Gemini para chat ${chatId || 'unknown'}. Histórico: ${history.length} msgs.`);
+          console.log(`[API Chat] A iniciar chat Gemini para ${chatId || 'unknown'}. Histórico: ${googleHistory.length} msgs.`);
           
-          const result = await ai.models.generateContent({
+          // 2. Chamada da API usando ai.chats.create (Padrão @google/genai v2+)
+          const chatSession = ai.chats.create({
             model: "gemini-3.5-flash", 
             config: { systemInstruction: sistemaPrompt },
-            contents: [
-              ...history,
-              { role: 'user', parts: [{ text: texto }] }
-            ]
+            history: googleHistory
           });
 
+          const result = await chatSession.sendMessage({ message: texto });
           respostaFinal = result.text || "";
+
           console.log(`[API Chat] Resposta recebida do Gemini: "${respostaFinal.slice(0, 50)}..."`);
 
-          if (!respostaFinal.trim()) {
-            console.warn("[API Chat] Gemini devolveu texto vazio. Usando fallback.");
+          // 3. Validação de Segurança (Fallback)
+          if (!respostaFinal || !respostaFinal.trim()) {
+            console.warn("[API Chat] Gemini devolveu texto vazio ou nulo. Usando fallback.");
             respostaFinal = fallbackResponse;
           }
         } catch (error) {
@@ -193,38 +201,53 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           respostaFinal = fallbackResponse;
         }
 
-        // --- OUTBOUND: ENVIO PARA O INSTAGRAM ---
-        if (chatData && chatData.canal === 'instagram' && chatData.clienteTelefone && chatData.origemId) {
+        // 4. Atualização e Envio
+        if (chatId) {
           try {
-            const pageId = chatData.origemId;
-            const senderId = chatData.clienteTelefone;
-            const token = getMetaToken(pageId);
+            const { updateDoc, doc, serverTimestamp } = await import("firebase/firestore");
+            const { db } = await import("../src/lib/firebase/config.js");
+            const { salvarMensagem } = await import("../src/lib/firebase/services.js");
 
-            if (token) {
-              console.log(`[API Chat] Enviando outbound para Instagram: ${senderId} via Page ${pageId}`);
-              const metaRes = await fetch(`https://graph.facebook.com/v25.0/${pageId}/messages`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({
-                  recipient: { id: senderId },
-                  message: { text: respostaFinal }
-                })
-              });
+            // Grave o 'responseText' no Firestore
+            console.log(`[API Chat] Gravando resposta IA no Firestore p/ chat ${chatId}`);
+            await salvarMensagem(chatId, 'ia', respostaFinal);
+            
+            // Mude o 'iaStatus' para 'respondido'
+            await updateDoc(doc(db, 'chats', chatId), {
+              iaStatus: 'respondido',
+              updatedAt: serverTimestamp()
+            });
+            
+            // Executa o POST de outbound para a Graph API da Meta
+            if (chatData && chatData.canal === 'instagram' && chatData.clienteTelefone && chatData.origemId) {
+              const pageId = chatData.origemId;
+              const senderId = chatData.clienteTelefone;
+              const token = getMetaToken(pageId);
 
-              if (metaRes.ok) {
-                console.log(`[API Chat] ✅ Resposta enviada com sucesso para o Instagram.`);
-              } else {
-                const errorData = await metaRes.json();
-                console.error(`[API Chat] ❌ Falha ao enviar para Instagram (Status ${metaRes.status}):`, JSON.stringify(errorData));
+              if (token) {
+                console.log(`[API Chat] Enviando outbound Meta para ${senderId}...`);
+                const metaRes = await fetch(`https://graph.facebook.com/v25.0/${pageId}/messages`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                  },
+                  body: JSON.stringify({
+                    recipient: { id: senderId },
+                    message: { text: respostaFinal }
+                  })
+                });
+
+                if (metaRes.ok) {
+                  console.log(`[API Chat] ✅ Resposta entregue no Instagram.`);
+                } else {
+                  const errorData = await metaRes.json();
+                  console.error(`[API Chat] ❌ Falha Meta:`, errorData);
+                }
               }
-            } else {
-              console.warn(`[API Chat] Token Meta não encontrado para Page ${pageId}. Outbound ignorado.`);
             }
-          } catch (outboundError) {
-            console.error("[API Chat] Erro ao processar outbound Meta:", outboundError);
+          } catch (postError) {
+            console.error("[API Chat] Erro no processamento pós-geração:", postError);
           }
         }
 
