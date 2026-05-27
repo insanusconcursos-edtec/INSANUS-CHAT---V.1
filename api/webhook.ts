@@ -225,7 +225,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const promptInstrucao = `${sistemaPrompt}\n\nATENÇÃO: Sua resposta DEVE ser curta, direta e ter no máximo 700 caracteres, pois o canal do Instagram rejeita mensagens longas. Nunca ultrapasse este limite.`;
 
             const chatSession = ai.chats.create({
-              model: "gemini-2.0-flash", 
+              model: "gemini-1.5-flash", 
               config: { systemInstruction: promptInstrucao },
               history: googleHistory
             });
@@ -341,7 +341,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
 
         const response = await ai.models.generateContent({
-          model: "gemini-2.0-flash",
+          model: "gemini-1.5-flash",
           contents: `Analise a seguinte mensagem de um cliente em uma plataforma CRM e categorize-a em um dos seguintes setores: "Comercial", "Financeiro" ou "Suporte Pedagógico".\nMensagem: "${texto}"`,
           config: {
             responseMimeType: "application/json",
