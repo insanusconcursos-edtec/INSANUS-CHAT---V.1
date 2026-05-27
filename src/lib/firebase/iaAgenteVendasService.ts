@@ -14,12 +14,7 @@ import type { Mensagem } from '@/src/types';
  */
 export async function gerarRespostaVendedorVirtual(chatId: string, historico: Mensagem[]) {
   try {
-    // 1. Sinaliza visualmente no Firestore que a IA está processando (Trava de estado)
     const chatRef = doc(db, 'chats', chatId);
-    await updateDoc(chatRef, {
-      iaStatus: 'processando',
-      updatedAt: serverTimestamp()
-    });
 
     const ultimaMensagem = historico[historico.length - 1]?.texto || "";
 
