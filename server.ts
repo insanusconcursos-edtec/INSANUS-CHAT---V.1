@@ -58,7 +58,7 @@ async function setupServer() {
 
       // In @google/genai v2+, we use generateContent with system instruction in model config
       const result = await ai.models.generateContent({
-        model: "gemini-1.5-flash", 
+        model: "gemini-1.5-flash-002", 
         config: {
           systemInstruction: sistemaPrompt,
         },
@@ -89,7 +89,7 @@ async function setupServer() {
       }
 
       const response = await ai.models.generateContent({
-        model: "gemini-1.5-flash",
+        model: "gemini-1.5-flash-002",
         contents: `Analise a seguinte mensagem de um cliente em uma plataforma CRM e categorize-a em um dos seguintes setores: "Comercial" (vendas, preços, interesse), "Financeiro" (pagamentos, boletos, reembolsos) ou "Suporte Pedagógico" (dúvidas sobre cursos, acesso, conteúdo).
         
         Mensagem: "${texto}"
