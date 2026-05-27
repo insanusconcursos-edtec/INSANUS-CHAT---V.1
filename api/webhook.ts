@@ -23,8 +23,6 @@ const getEnv = (key: string): string => {
 /**
  * Handler Fail-Safe para Webhook da Meta e APIs do sistema na Vercel
  */
-const processandoMensagens = new Set<string>();
-
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { method, query } = req;
 
@@ -140,13 +138,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { GoogleGenAI } = await import("@google/genai");
         const { mid, texto, historico, sistemaPrompt, chatId } = body;
 
-        // 1. Verificação Atômica em Memória (Deduplicação Proativa)
+        // 1. Verificação Atômica no Firestore (Idempotência Baseada no mid)
         if (mid) {
-          if (processandoMensagens.has(mid)) {
-            console.log(`[API Chat] Bloqueio em memória p/ mid: ${mid}.`);
-            return res.status(200).json({ message: "Requisição duplicada bloqueada em memória" });
+          try {
+            const { getDoc, doc, setDoc, serverTimestamp } = await import("firebase/firestore");
+            const { db } = await import("../src/lib/firebase/config.js");
+            
+            const processedRef = doc(db, 'mensagens_processadas', mid);
+            const processedSnap = await getDoc(processedRef);
+
+            if (processedSnap.exists()) {
+              console.log(`[API Chat] Mensagem ${mid} já processada (Firestore). Ignorando.`);
+              return res.status(200).json({ message: "Mensagem já processada anteriormente." });
+            }
+
+            // Gravação Atômica do Carimbo ANTES de processar
+            await setDoc(processedRef, { 
+              timestamp: serverTimestamp(),
+              chatId: chatId || 'unknown'
+            });
+            console.log(`[API Chat] mid ${mid} marcado como processado.`);
+          } catch (e) {
+            console.error("[API Chat] Erro no controle de idempotência Firestore:", e);
           }
-          processandoMensagens.add(mid);
         }
         
         try {
@@ -299,12 +313,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
 
           return res.json({ resposta: respostaFinal });
-        } finally {
-          // Limpeza do Cache em Memória
-          if (mid) {
-            processandoMensagens.delete(mid);
-            console.log(`[API Chat] Memória liberada para mid: ${mid}`);
-          }
+        } catch (err) {
+          console.error("[API Chat] Erro inesperado:", err);
+          return res.status(500).json({ error: "Erro no processamento do chat" });
         }
       }
 
