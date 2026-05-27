@@ -142,18 +142,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const chatSnap = await getDoc(doc(db, 'chats', chatId));
             if (chatSnap.exists()) {
               chatData = chatSnap.data();
-              // Se já está em processamento, interrompe para evitar loop. 
-              if (chatData.iaStatus === 'processando') {
-                console.log(`[API Chat] Chat ${chatId} já está em processamento. Ignorando requisição duplicada.`);
-                return res.json({ resposta: "" });
-              }
+              // A trava de segurança simplificada: 
+              // Se iaStatus for 'novo', 'pendente' ou 'respondido' (resetado por nova msg), permitimos prosseguir.
+              // O status 'processando' é gerido pelo Worker que chama esta API, por isso não bloqueamos aqui
+              // para evitar que a API bloqueie a si mesma.
             }
           } catch (e) {
             console.error("[API Chat] Erro ao verificar idempotência/chat:", e)
           }
         }
 
-        const fallbackResponse = "Olá! Recebi sua mensagem. Um de nossos consultores humanos já vai te atender em instantes!";
+        const fallbackResponse = "Olá! No momento estou processando muitas requisições, mas já te respondo!";
         let respostaFinal = "";
 
         try {
@@ -166,20 +165,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           });
 
           // 1. Mapeamento do Histórico conforme solicitado
-          // Removemos a última mensagem do histórico se ela for igual ao 'texto' atual para evitar repetição no prompt
           const rawHistory = (historico || []);
-          const historyForMapping = rawHistory.length > 0 && rawHistory[rawHistory.length -1].texto === texto 
+          // Removemos a última mensagem do histórico se ela for igual ao 'texto' atual para evitar repetição
+          const historyForMapping = rawHistory.length > 0 && rawHistory[rawHistory.length - 1].texto === texto 
             ? rawHistory.slice(0, -1) 
             : rawHistory;
 
           const googleHistory = historyForMapping.map((msg: any) => ({
             role: (msg.remetente === 'cliente' || msg.remetente === 'usuario') ? 'user' : 'model',
-            parts: [{ text: msg.texto || "" }]
+            parts: [{ text: msg.texto || "Oi" }]
           }));
 
           console.log(`[API Chat] A iniciar chat Gemini para ${chatId || 'unknown'}. Histórico: ${googleHistory.length} msgs.`);
           
-          // 2. Chamada da API usando ai.chats.create (Padrão @google/genai v2+)
           const chatSession = ai.chats.create({
             model: "gemini-3.5-flash", 
             config: { systemInstruction: sistemaPrompt },
@@ -189,36 +187,52 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const result = await chatSession.sendMessage({ message: texto });
           respostaFinal = result.text || "";
 
-          console.log(`[API Chat] Resposta recebida do Gemini: "${respostaFinal.slice(0, 50)}..."`);
-
-          // 3. Validação de Segurança (Fallback)
           if (!respostaFinal || !respostaFinal.trim()) {
-            console.warn("[API Chat] Gemini devolveu texto vazio ou nulo. Usando fallback.");
-            respostaFinal = fallbackResponse;
+            throw new Error("Gemini devolveu texto vazio");
           }
+
+          console.log(`[API Chat] Resposta recebida: "${respostaFinal.slice(0, 50)}..."`);
         } catch (error) {
-          console.error("[API Chat] Erro crítico na chamada do Gemini:", error);
+          console.error("[API Chat] Erro crítico na IA:", error);
           respostaFinal = fallbackResponse;
+
+          // Destravar o chat se houver erro
+          if (chatId) {
+            try {
+              const { updateDoc, doc, serverTimestamp } = await import("firebase/firestore");
+              const { db } = await import("../src/lib/firebase/config.js");
+              await updateDoc(doc(db, 'chats', chatId), {
+                iaStatus: 'novo', // Volta para novo para permitir re-tentativa ou intervenção
+                updatedAt: serverTimestamp(),
+                ultimoErroIA: String(error)
+              });
+              console.log(`[API Chat] Status do chat ${chatId} resetado para 'novo' devido a erro.`);
+            } catch (repoError) {
+              console.error("[API Chat] Falha ao resetar status:", repoError);
+            }
+          }
         }
 
-        // 4. Atualização e Envio
-        if (chatId) {
+        // 4. Atualização e Envio (Executa sempre, seja resposta real ou fallback)
+        if (chatId && respostaFinal) {
           try {
             const { updateDoc, doc, serverTimestamp } = await import("firebase/firestore");
             const { db } = await import("../src/lib/firebase/config.js");
             const { salvarMensagem } = await import("../src/lib/firebase/services.js");
 
-            // Grave o 'responseText' no Firestore
-            console.log(`[API Chat] Gravando resposta IA no Firestore p/ chat ${chatId}`);
+            // Grave a mensagem no Firestore
+            console.log(`[API Chat] Gravando mensagem no Firestore p/ chat ${chatId}`);
             await salvarMensagem(chatId, 'ia', respostaFinal);
             
-            // Mude o 'iaStatus' para 'respondido'
-            await updateDoc(doc(db, 'chats', chatId), {
-              iaStatus: 'respondido',
-              updatedAt: serverTimestamp()
-            });
+            // Marcar como respondido apenas se houve sucesso na geração (se respostaFinal for a de fallback do erro, o status já foi resetado acima)
+            if (respostaFinal !== fallbackResponse) {
+              await updateDoc(doc(db, 'chats', chatId), {
+                iaStatus: 'respondido',
+                updatedAt: serverTimestamp()
+              });
+            }
             
-            // Executa o POST de outbound para a Graph API da Meta
+            // Envio para o Instagram (Graph API)
             if (chatData && chatData.canal === 'instagram' && chatData.clienteTelefone && chatData.origemId) {
               const pageId = chatData.origemId;
               const senderId = chatData.clienteTelefone;
@@ -318,7 +332,16 @@ async function processarEventoWhatsApp(contato: string, texto: string, nomeClien
     if (chatId) {
       console.log(`[WhatsApp Debug] A TENTAR GUARDAR MENSAGEM NO FIRESTORE (ChatID: ${chatId})...`);
       await salvarMensagem(chatId, 'cliente', texto);
-      console.log(`[WhatsApp Debug] ✅ GUARDADO COM SUCESSO. ChatID: ${chatId}`);
+      
+      // Forçar status 'novo' para destravar a IA
+      const { doc, updateDoc, serverTimestamp } = await import("firebase/firestore");
+      const { db } = await import("../src/lib/firebase/config.js");
+      await updateDoc(doc(db, 'chats', chatId), {
+        iaStatus: 'novo',
+        updatedAt: serverTimestamp()
+      });
+
+      console.log(`[WhatsApp Debug] ✅ GUARDADO E STATUS RESETADO. ChatID: ${chatId}`);
       console.log(`[WhatsApp Success] Msg de ${contato} processada (Canal: ${phoneId}).`);
     } else {
       console.warn(`[WhatsApp Warning] Não foi possível encontrar ou criar chat para ${contato}`);
@@ -332,7 +355,7 @@ async function processarEventoWhatsApp(contato: string, texto: string, nomeClien
 async function processarEventoInstagram(senderId: string, texto: string, pageId: string | undefined, token: string | undefined) {
   try {
     const { buscarChatPorContato, salvarMensagem, criarNovoChat } = await import("../src/lib/firebase/services.js");
-    const { doc, updateDoc } = await import("firebase/firestore");
+    const { doc, updateDoc, serverTimestamp } = await import("firebase/firestore");
     const { db } = await import("../src/lib/firebase/config.js");
 
     console.log(`[Instagram Debug] Início do processamento para ${senderId}`);
@@ -399,7 +422,14 @@ async function processarEventoInstagram(senderId: string, texto: string, pageId:
     if (chatId) {
       console.log(`[Instagram Debug] c) Gravando mensagem no Firestore...`);
       await salvarMensagem(chatId, 'cliente', texto);
-      console.log(`[Instagram Debug] ✅ MENSAGEM GUARDADA COM SUCESSO. ChatID: ${chatId}`);
+      
+      // Forçar status 'novo' para destravar a IA caso o salvarMensagem não o tenha feito
+      await updateDoc(doc(db, 'chats', chatId), {
+        iaStatus: 'novo',
+        updatedAt: serverTimestamp()
+      });
+
+      console.log(`[Instagram Debug] ✅ MENSAGEM GUARDADA E STATUS RESETADO. ChatID: ${chatId}`);
     } else {
       console.warn(`[Instagram Warning] Falha ao obter ChatID.`);
     }
