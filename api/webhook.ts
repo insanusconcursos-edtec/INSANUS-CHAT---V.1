@@ -169,30 +169,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           // Idempotência e busca de metadados com Lock Simples
           if (chatId) {
             try {
-              const { getDoc, updateDoc, doc, serverTimestamp } = await import("firebase/firestore");
+              const { doc, serverTimestamp, runTransaction } = await import("firebase/firestore");
               const { db } = await import("../src/lib/firebase/config.js");
               const chatRef = doc(db, 'chats', chatId);
 
-              const chatSnap = await getDoc(chatRef);
-              if (chatSnap.exists()) {
-                chatData = chatSnap.data();
-                
-                // Verificação Rigorosa: Só prossegue se for 'novo'
-                if (chatData.iaStatus !== 'novo') {
-                  console.log(`[API Chat] Chat ${chatId} status "${chatData.iaStatus}". Abortando loop.`);
-                  return res.status(200).json({ message: "Já em processamento. Encerrado." });
+              await runTransaction(db, async (transaction) => {
+                const chatSnap = await transaction.get(chatRef);
+                if (chatSnap.exists()) {
+                  chatData = chatSnap.data();
+                  
+                  // Verificação Rigorosa: Só prossegue se for 'novo'
+                  if (chatData.iaStatus !== 'novo') {
+                    throw new Error("ALREADY_PROCESSING");
+                  }
+                  
+                  // Reserva o chat mudando para 'processando' IMEDIATAMENTE
+                  transaction.update(chatRef, { 
+                    iaStatus: 'processando',
+                    updatedAt: serverTimestamp()
+                  });
                 }
-                
-                // Reserva o chat mudando para 'processando' IMEDIATAMENTE
-                await updateDoc(chatRef, { 
-                  iaStatus: 'processando',
-                  updatedAt: serverTimestamp()
-                });
-                console.log(`[API Chat] Lock simples aplicado para ${chatId}`);
-              }
+              });
+              console.log(`[API Chat] Lock atômico aplicado para ${chatId}`);
             } catch (e: any) {
-              console.error("[API Chat] Erro ao aplicar lock simples:", e);
-              return res.status(200).json({ message: "Ignorando duplicado com base no lock" });
+              if (e.message === "ALREADY_PROCESSING") {
+                console.log(`[API Chat] Chat ${chatId} status falhou na trava. Abortando loop.`);
+                return res.status(200).json({ message: "Duplicado ignorado" });
+              }
+              console.error("[API Chat] Erro ao aplicar lock atômico:", e);
+              return res.status(200).json({ message: "Duplicado ignorado" });
             }
           }
 
@@ -221,8 +226,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
             console.log(`[API Chat] A iniciar chat Gemini para ${chatId || 'unknown'}. Histórico: ${googleHistory.length} msgs.`);
             
-            // Reforço de instrução de tamanho no prompt
-            const promptInstrucao = `${sistemaPrompt}\n\nATENÇÃO: Sua resposta DEVE ser curta, direta e ter no máximo 700 caracteres, pois o canal do Instagram rejeita mensagens longas. Nunca ultrapasse este limite.`;
+            // Reforço de instrução de tamanho e formatação no prompt
+            const promptInstrucao = `${sistemaPrompt}\n\nATENÇÃO: Sua resposta DEVE ser curta, direta e ter no máximo 700 caracteres, pois o canal do Instagram rejeita mensagens longas. Nunca ultrapasse este limite.\n\nIMPORTANTE: Gere o texto EXCLUSIVAMENTE em plain text (texto puro). NÃO utilize formatação Markdown, NÃO coloque palavras em negrito com asteriscos (**), NÃO use itálico ou listas formatadas.`;
 
             const chatSession = ai.chats.create({
               model: "gemini-3.5-flash", 
@@ -231,7 +236,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             });
 
             const result = await chatSession.sendMessage({ message: texto });
-            respostaFinal = result.text || "";
+            const textoGerado = result.text || "";
+            // Filtro de sanitização: remove asteriscos para evitar negritos no Instagram
+            respostaFinal = textoGerado.replace(/\*/g, '');
 
             if (!respostaFinal || !respostaFinal.trim()) {
               throw new Error("Gemini devolveu texto vazio");
