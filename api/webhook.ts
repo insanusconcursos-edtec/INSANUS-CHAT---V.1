@@ -225,7 +225,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const promptInstrucao = `${sistemaPrompt}\n\nATENÇÃO: Sua resposta DEVE ser curta, direta e ter no máximo 700 caracteres, pois o canal do Instagram rejeita mensagens longas. Nunca ultrapasse este limite.`;
 
             const chatSession = ai.chats.create({
-              model: "gemini-3.5-flash", 
+              model: "gemini-2.0-flash", 
               config: { systemInstruction: promptInstrucao },
               history: googleHistory
             });
@@ -240,7 +240,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             console.log(`[API Chat] Resposta recebida: "${respostaFinal.slice(0, 50)}..."`);
           } catch (error) {
             console.error("[API Chat] Erro crítico na IA:", error);
-            respostaFinal = fallbackResponse;
 
             // Destravar o chat no Firestore se houver erro
             if (chatId) {
@@ -248,15 +247,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 const { updateDoc, doc, serverTimestamp } = await import("firebase/firestore");
                 const { db } = await import("../src/lib/firebase/config.js");
                 await updateDoc(doc(db, 'chats', chatId), {
-                  iaStatus: 'novo', 
+                  iaStatus: 'erro', 
                   updatedAt: serverTimestamp(),
                   ultimoErroIA: String(error)
                 });
-                console.log(`[API Chat] Status do chat ${chatId} resetado para 'novo' devido a erro.`);
+                console.log(`[API Chat] Status do chat ${chatId} resetado para 'erro' devido a erro.`);
               } catch (repoError) {
                 console.error("[API Chat] Falha ao resetar status:", repoError);
               }
             }
+            
+            return res.status(200).json({ message: "Erro no motor da IA, mas requisição encerrada para evitar loops." });
           }
 
           // 4. Atualização e Envio (Executa sempre, seja resposta real ou fallback)
@@ -340,7 +341,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
 
         const response = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
+          model: "gemini-2.0-flash",
           contents: `Analise a seguinte mensagem de um cliente em uma plataforma CRM e categorize-a em um dos seguintes setores: "Comercial", "Financeiro" ou "Suporte Pedagógico".\nMensagem: "${texto}"`,
           config: {
             responseMimeType: "application/json",

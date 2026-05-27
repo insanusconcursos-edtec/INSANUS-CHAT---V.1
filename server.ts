@@ -58,7 +58,7 @@ async function setupServer() {
 
       // In @google/genai v2+, we use generateContent with system instruction in model config
       const result = await ai.models.generateContent({
-        model: "gemini-1.5-flash", 
+        model: "gemini-2.0-flash", 
         config: {
           systemInstruction: sistemaPrompt,
         },
@@ -76,7 +76,7 @@ async function setupServer() {
       res.json({ resposta: responseText });
     } catch (error) {
       console.error("Chat API error:", error);
-      res.status(500).json({ error: "Internal server error during chat generation" });
+      res.status(200).json({ error: "Internal server error during chat generation" });
     }
   });
 
@@ -89,7 +89,7 @@ async function setupServer() {
       }
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-2.0-flash",
         contents: `Analise a seguinte mensagem de um cliente em uma plataforma CRM e categorize-a em um dos seguintes setores: "Comercial" (vendas, preços, interesse), "Financeiro" (pagamentos, boletos, reembolsos) ou "Suporte Pedagógico" (dúvidas sobre cursos, acesso, conteúdo).
         
         Mensagem: "${texto}"
