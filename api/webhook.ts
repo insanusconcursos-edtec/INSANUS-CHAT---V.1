@@ -166,36 +166,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         try {
           let chatData: any = null;
 
-          // Idempotência e busca de metadados com Lock Atômico via Transação Atômica
+          // Idempotência e busca de metadados com Lock Simples
           if (chatId) {
             try {
-              const { runTransaction, doc, serverTimestamp } = await import("firebase/firestore");
+              const { getDoc, updateDoc, doc, serverTimestamp } = await import("firebase/firestore");
               const { db } = await import("../src/lib/firebase/config.js");
               const chatRef = doc(db, 'chats', chatId);
 
-              await runTransaction(db, async (transaction) => {
-                const chatSnap = await transaction.get(chatRef);
-                if (!chatSnap.exists()) return;
-                
+              const chatSnap = await getDoc(chatRef);
+              if (chatSnap.exists()) {
                 chatData = chatSnap.data();
+                
                 // Verificação Rigorosa: Só prossegue se for 'novo'
                 if (chatData.iaStatus !== 'novo') {
-                  throw new Error('DUPLICATE_REQUEST');
+                  console.log(`[API Chat] Chat ${chatId} status "${chatData.iaStatus}". Abortando loop.`);
+                  return res.status(200).json({ message: "Já em processamento. Encerrado." });
                 }
                 
-                // Reserva o chat mudando para 'processando' IMEDIATAMENTE e atomicamente
-                transaction.update(chatRef, { 
+                // Reserva o chat mudando para 'processando' IMEDIATAMENTE
+                await updateDoc(chatRef, { 
                   iaStatus: 'processando',
                   updatedAt: serverTimestamp()
                 });
-              });
-              console.log(`[API Chat] Lock atômico via Transação concluído para ${chatId}`);
-            } catch (e: any) {
-              if (e.message === 'DUPLICATE_REQUEST') {
-                console.log(`[API Chat] Requisição duplicada bloqueada na Transação para ${chatId}.`);
-                return res.status(200).json({ message: "Duplicado bloqueado na transação" });
+                console.log(`[API Chat] Lock simples aplicado para ${chatId}`);
               }
-              console.error("[API Chat] Erro ao aplicar transação de lock:", e);
+            } catch (e: any) {
+              console.error("[API Chat] Erro ao aplicar lock simples:", e);
+              return res.status(200).json({ message: "Ignorando duplicado com base no lock" });
             }
           }
 
@@ -329,7 +326,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return res.json({ resposta: respostaFinal });
         } catch (err) {
           console.error("[API Chat] Erro inesperado:", err);
-          return res.status(500).json({ error: "Erro no processamento do chat" });
+          return res.status(200).json({ error: "Erro no processamento do chat" });
         }
       }
 
@@ -363,7 +360,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     } catch (error) {
       console.error("[POST Handler Error]:", error);
-      return res.status(500).json({ error: "Internal Server Error" });
+      return res.status(200).json({ error: "Internal Server Error ignored" });
     }
   }
 
