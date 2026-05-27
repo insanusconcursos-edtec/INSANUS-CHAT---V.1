@@ -244,30 +244,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             
             // Envio para o Instagram (Graph API)
             if (chatData && chatData.canal === 'instagram' && chatData.clienteTelefone && chatData.origemId) {
-              const pageId = chatData.origemId;
-              const senderId = chatData.clienteTelefone;
-              const token = getMetaToken(pageId);
+              try {
+                const pageId = chatData.origemId;
+                const senderId = chatData.clienteTelefone;
+                const token = getMetaToken(pageId);
 
-              if (token) {
-                console.log(`[API Chat] Enviando outbound Meta (me/messages) para ${senderId}...`);
-                const metaRes = await fetch(`https://graph.facebook.com/v25.0/me/messages`, {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                  },
-                  body: JSON.stringify({
-                    recipient: { id: senderId },
-                    message: { text: respostaFinal }
-                  })
-                });
+                if (token) {
+                  console.log(`[API Chat] Enviando outbound Meta (me/messages) para ${senderId}...`);
+                  const metaRes = await fetch(`https://graph.facebook.com/v25.0/me/messages`, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                      recipient: { id: senderId },
+                      message: { text: respostaFinal }
+                    })
+                  });
 
-                if (metaRes.ok) {
-                  console.log(`[API Chat] ✅ Resposta entregue no Instagram.`);
-                } else {
-                  const errorData = await metaRes.json();
-                  console.error(`[API Chat] ❌ Falha Meta:`, errorData);
+                  if (metaRes.ok) {
+                    console.log(`[API Chat] ✅ Resposta entregue no Instagram.`);
+                  } else {
+                    const errorData = await metaRes.json();
+                    console.error(`[API Chat] ❌ Falha Meta (Status ${metaRes.status}):`, JSON.stringify(errorData));
+                    console.log(`[Meta Bypass] Erro de envio capturado, mas resposta já salva no Firestore.`);
+                  }
                 }
+              } catch (metaError) {
+                console.error(`[API Chat] Erro na requisição Meta:`, metaError);
+                console.log(`[Meta Bypass] Exceção no envio capturada, mas resposta já salva no Firestore.`);
               }
             }
           } catch (postError) {
