@@ -23,6 +23,8 @@ const getEnv = (key: string): string => {
 /**
  * Handler Fail-Safe para Webhook da Meta e APIs do sistema na Vercel
  */
+const processandoMensagens = new Set<string>();
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { method, query } = req;
 
@@ -136,158 +138,174 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // --- ROTA: API CHAT (GEMINI) ---
       if (path.includes('/api/chat')) {
         const { GoogleGenAI } = await import("@google/genai");
-        const { texto, historico, sistemaPrompt, chatId } = body;
-        
-        let chatData: any = null;
+        const { mid, texto, historico, sistemaPrompt, chatId } = body;
 
-        // Idempotência e busca de metadados com Lock Atômico
-        if (chatId) {
-          try {
-            const { getDoc, doc, updateDoc, serverTimestamp } = await import("firebase/firestore");
-            const { db } = await import("../src/lib/firebase/config.js");
-            const chatRef = doc(db, 'chats', chatId);
-            const chatSnap = await getDoc(chatRef);
-            
-            if (chatSnap.exists()) {
-              chatData = chatSnap.data();
-              // 2. Verificação Rigorosa
-              if (chatData.iaStatus === 'processando' || chatData.iaStatus === 'respondido') {
-                console.log(`[API Chat] Chat ${chatId} com status "${chatData.iaStatus}". Ignorando duplicado.`);
-                return res.status(200).json({ message: "Ignorando duplicado em andamento" });
-              }
-              
-              // 1. Trava Simultânea Imediata (Lock Atômico)
-              await updateDoc(chatRef, { 
-                iaStatus: 'processando',
-                updatedAt: serverTimestamp()
-              });
-              console.log(`[API Chat] Lock atômico ativo para ${chatId} (iaStatus: processando)`);
-            }
-          } catch (e) {
-            console.error("[API Chat] Erro ao aplicar lock atômico:", e);
+        // 1. Verificação Atômica em Memória (Deduplicação Proativa)
+        if (mid) {
+          if (processandoMensagens.has(mid)) {
+            console.log(`[API Chat] Bloqueio em memória p/ mid: ${mid}.`);
+            return res.status(200).json({ message: "Requisição duplicada bloqueada em memória" });
           }
+          processandoMensagens.add(mid);
         }
-
-        const fallbackResponse = "Olá! No momento estou processando muitas requisições, mas já te respondo!";
-        let respostaFinal = "";
-
+        
         try {
-          const apiKey = getEnv('GEMINI_API_KEY');
-          if (!apiKey) throw new Error("GEMINI_API_KEY não configurada");
+          let chatData: any = null;
 
-          const ai = new GoogleGenAI({ 
-            apiKey,
-            httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
-          });
-
-          // 1. Mapeamento do Histórico conforme solicitado
-          const rawHistory = (historico || []);
-          // Removemos a última mensagem do histórico se ela for igual ao 'texto' atual para evitar repetição
-          const historyForMapping = rawHistory.length > 0 && rawHistory[rawHistory.length - 1].texto === texto 
-            ? rawHistory.slice(0, -1) 
-            : rawHistory;
-
-          const googleHistory = historyForMapping.map((msg: any) => ({
-            role: (msg.remetente === 'cliente' || msg.remetente === 'usuario') ? 'user' : 'model',
-            parts: [{ text: msg.texto || "Oi" }]
-          }));
-
-          console.log(`[API Chat] A iniciar chat Gemini para ${chatId || 'unknown'}. Histórico: ${googleHistory.length} msgs.`);
-          
-          const chatSession = ai.chats.create({
-            model: "gemini-3.5-flash", 
-            config: { systemInstruction: sistemaPrompt },
-            history: googleHistory
-          });
-
-          const result = await chatSession.sendMessage({ message: texto });
-          respostaFinal = result.text || "";
-
-          if (!respostaFinal || !respostaFinal.trim()) {
-            throw new Error("Gemini devolveu texto vazio");
+          // Idempotência e busca de metadados com Lock Atômico no Firestore
+          if (chatId) {
+            try {
+              const { getDoc, doc, updateDoc, serverTimestamp } = await import("firebase/firestore");
+              const { db } = await import("../src/lib/firebase/config.js");
+              const chatRef = doc(db, 'chats', chatId);
+              const chatSnap = await getDoc(chatRef);
+              
+              if (chatSnap.exists()) {
+                chatData = chatSnap.data();
+                // Verificação Rigorosa no Firestore (Segundo nível de defesa)
+                if (chatData.iaStatus === 'processando' || chatData.iaStatus === 'respondido') {
+                  console.log(`[API Chat] Chat ${chatId} com status "${chatData.iaStatus}". Ignorando duplicado.`);
+                  return res.status(200).json({ message: "Ignorando duplicado em andamento" });
+                }
+                
+                // Trava Simultânea Imediata (Lock Atômico no DB)
+                await updateDoc(chatRef, { 
+                  iaStatus: 'processando',
+                  updatedAt: serverTimestamp()
+                });
+                console.log(`[API Chat] Lock atômico ativo para ${chatId} (iaStatus: processando)`);
+              }
+            } catch (e) {
+              console.error("[API Chat] Erro ao aplicar lock atômico:", e);
+            }
           }
 
-          console.log(`[API Chat] Resposta recebida: "${respostaFinal.slice(0, 50)}..."`);
-        } catch (error) {
-          console.error("[API Chat] Erro crítico na IA:", error);
-          respostaFinal = fallbackResponse;
+          const fallbackResponse = "Olá! No momento estou processando muitas requisições, mas já te respondo!";
+          let respostaFinal = "";
 
-          // Destravar o chat se houver erro
-          if (chatId) {
+          try {
+            const apiKey = getEnv('GEMINI_API_KEY');
+            if (!apiKey) throw new Error("GEMINI_API_KEY não configurada");
+
+            const ai = new GoogleGenAI({ 
+              apiKey,
+              httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
+            });
+
+            // Mapeamento do Histórico conforme solicitado
+            const rawHistory = (historico || []);
+            const historyForMapping = rawHistory.length > 0 && rawHistory[rawHistory.length - 1].texto === texto 
+              ? rawHistory.slice(0, -1) 
+              : rawHistory;
+
+            const googleHistory = historyForMapping.map((msg: any) => ({
+              role: (msg.remetente === 'cliente' || msg.remetente === 'usuario') ? 'user' : 'model',
+              parts: [{ text: msg.texto || "Oi" }]
+            }));
+
+            console.log(`[API Chat] A iniciar chat Gemini para ${chatId || 'unknown'}. Histórico: ${googleHistory.length} msgs.`);
+            
+            const chatSession = ai.chats.create({
+              model: "gemini-3.5-flash", 
+              config: { systemInstruction: sistemaPrompt },
+              history: googleHistory
+            });
+
+            const result = await chatSession.sendMessage({ message: texto });
+            respostaFinal = result.text || "";
+
+            if (!respostaFinal || !respostaFinal.trim()) {
+              throw new Error("Gemini devolveu texto vazio");
+            }
+
+            console.log(`[API Chat] Resposta recebida: "${respostaFinal.slice(0, 50)}..."`);
+          } catch (error) {
+            console.error("[API Chat] Erro crítico na IA:", error);
+            respostaFinal = fallbackResponse;
+
+            // Destravar o chat no Firestore se houver erro
+            if (chatId) {
+              try {
+                const { updateDoc, doc, serverTimestamp } = await import("firebase/firestore");
+                const { db } = await import("../src/lib/firebase/config.js");
+                await updateDoc(doc(db, 'chats', chatId), {
+                  iaStatus: 'novo', 
+                  updatedAt: serverTimestamp(),
+                  ultimoErroIA: String(error)
+                });
+                console.log(`[API Chat] Status do chat ${chatId} resetado para 'novo' devido a erro.`);
+              } catch (repoError) {
+                console.error("[API Chat] Falha ao resetar status:", repoError);
+              }
+            }
+          }
+
+          // 4. Atualização e Envio (Executa sempre, seja resposta real ou fallback)
+          if (chatId && respostaFinal) {
             try {
               const { updateDoc, doc, serverTimestamp } = await import("firebase/firestore");
               const { db } = await import("../src/lib/firebase/config.js");
-              await updateDoc(doc(db, 'chats', chatId), {
-                iaStatus: 'novo', // Volta para novo para permitir re-tentativa ou intervenção
-                updatedAt: serverTimestamp(),
-                ultimoErroIA: String(error)
-              });
-              console.log(`[API Chat] Status do chat ${chatId} resetado para 'novo' devido a erro.`);
-            } catch (repoError) {
-              console.error("[API Chat] Falha ao resetar status:", repoError);
-            }
-          }
-        }
+              const { salvarMensagem } = await import("../src/lib/firebase/services.js");
 
-        // 4. Atualização e Envio (Executa sempre, seja resposta real ou fallback)
-        if (chatId && respostaFinal) {
-          try {
-            const { updateDoc, doc, serverTimestamp } = await import("firebase/firestore");
-            const { db } = await import("../src/lib/firebase/config.js");
-            const { salvarMensagem } = await import("../src/lib/firebase/services.js");
-
-            // Grave a mensagem no Firestore
-            console.log(`[API Chat] Gravando mensagem no Firestore p/ chat ${chatId}`);
-            await salvarMensagem(chatId, 'ia', respostaFinal);
-            
-            // Marcar como respondido apenas se houve sucesso na geração (se respostaFinal for a de fallback do erro, o status já foi resetado acima)
-            if (respostaFinal !== fallbackResponse) {
-              await updateDoc(doc(db, 'chats', chatId), {
-                iaStatus: 'respondido',
-                updatedAt: serverTimestamp()
-              });
-            }
-            
-            // Envio para o Instagram (Graph API)
-            if (chatData && chatData.canal === 'instagram' && chatData.clienteTelefone && chatData.origemId) {
-              try {
-                const pageId = chatData.origemId;
-                const senderId = chatData.clienteTelefone;
-                const token = getMetaToken(pageId);
-
-                if (token) {
-                  console.log(`[API Chat] Enviando outbound Meta (me/messages) para ${senderId}...`);
-                  const metaRes = await fetch(`https://graph.facebook.com/v25.0/me/messages`, {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      'Authorization': `Bearer ${token}`
-                    },
-                    body: JSON.stringify({
-                      recipient: { id: senderId },
-                      message: { text: respostaFinal }
-                    })
-                  });
-
-                  if (metaRes.ok) {
-                    console.log(`[API Chat] ✅ Resposta entregue no Instagram.`);
-                  } else {
-                    const errorData = await metaRes.json();
-                    console.error(`[API Chat] ❌ Falha Meta (Status ${metaRes.status}):`, JSON.stringify(errorData));
-                    console.log(`[Meta Bypass] Erro de envio capturado, mas resposta já salva no Firestore.`);
-                  }
-                }
-              } catch (metaError) {
-                console.error(`[API Chat] Erro na requisição Meta:`, metaError);
-                console.log(`[Meta Bypass] Exceção no envio capturada, mas resposta já salva no Firestore.`);
+              // Grave a mensagem no Firestore
+              console.log(`[API Chat] Gravando mensagem no Firestore p/ chat ${chatId}`);
+              await salvarMensagem(chatId, 'ia', respostaFinal);
+              
+              // Marcar como respondido se sucesso
+              if (respostaFinal !== fallbackResponse) {
+                await updateDoc(doc(db, 'chats', chatId), {
+                  iaStatus: 'respondido',
+                  updatedAt: serverTimestamp()
+                });
               }
+              
+              // Envio para o Instagram (Graph API)
+              if (chatData && chatData.canal === 'instagram' && chatData.clienteTelefone && chatData.origemId) {
+                try {
+                  const pageId = chatData.origemId;
+                  const senderId = chatData.clienteTelefone;
+                  const token = getMetaToken(pageId);
+
+                  if (token) {
+                    console.log(`[API Chat] Enviando outbound Meta (me/messages) para ${senderId}...`);
+                    const metaRes = await fetch(`https://graph.facebook.com/v25.0/me/messages`, {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                      },
+                      body: JSON.stringify({
+                        recipient: { id: senderId },
+                        message: { text: respostaFinal }
+                      })
+                    });
+
+                    if (metaRes.ok) {
+                      console.log(`[API Chat] ✅ Resposta entregue no Instagram.`);
+                    } else {
+                      const errorData = await metaRes.json();
+                      console.error(`[API Chat] ❌ Falha Meta (Status ${metaRes.status}):`, JSON.stringify(errorData));
+                      console.log(`[Meta Bypass] Erro de envio capturado, mas resposta já salva no Firestore.`);
+                    }
+                  }
+                } catch (metaError) {
+                  console.error(`[API Chat] Erro na requisição Meta:`, metaError);
+                  console.log(`[Meta Bypass] Exceção no envio capturada, mas resposta já salva no Firestore.`);
+                }
+              }
+            } catch (postError) {
+              console.error("[API Chat] Erro no processamento pós-geração:", postError);
             }
-          } catch (postError) {
-            console.error("[API Chat] Erro no processamento pós-geração:", postError);
+          }
+
+          return res.json({ resposta: respostaFinal });
+        } finally {
+          // Limpeza do Cache em Memória
+          if (mid) {
+            processandoMensagens.delete(mid);
+            console.log(`[API Chat] Memória liberada para mid: ${mid}`);
           }
         }
-
-        return res.json({ resposta: respostaFinal });
       }
 
       // --- ROTA: API TRIAGEM (GEMINI) ---
