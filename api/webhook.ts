@@ -206,8 +206,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
             });
 
-            // Mapeamento do Histórico conforme solicitado
-            const rawHistory = (historico || []);
+            // Mapeamento do Histórico conforme solicitado (limitando aos últimos 5 para contexto focado)
+            const rawHistory = (historico || []).slice(-5);
             const historyForMapping = rawHistory.length > 0 && rawHistory[rawHistory.length - 1].texto === texto 
               ? rawHistory.slice(0, -1) 
               : rawHistory;
@@ -219,9 +219,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
             console.log(`[API Chat] A iniciar chat Gemini para ${chatId || 'unknown'}. Histórico: ${googleHistory.length} msgs.`);
             
+            // Reforço de instrução de tamanho no prompt
+            const promptInstrucao = `${sistemaPrompt}\n\nATENÇÃO: Sua resposta DEVE ser curta, direta e ter no máximo 700 caracteres, pois o canal do Instagram rejeita mensagens longas. Nunca ultrapasse este limite.`;
+
             const chatSession = ai.chats.create({
               model: "gemini-3.5-flash", 
-              config: { systemInstruction: sistemaPrompt },
+              config: { systemInstruction: promptInstrucao },
               history: googleHistory
             });
 
@@ -260,6 +263,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               const { updateDoc, doc, serverTimestamp } = await import("firebase/firestore");
               const { db } = await import("../src/lib/firebase/config.js");
               const { salvarMensagem } = await import("../src/lib/firebase/services.js");
+
+              // Filtro de Segurança: Truncar resposta para Meta antes de enviar
+              if (respostaFinal.length > 950) {
+                console.log(`[API Chat] Truncando resposta de ${respostaFinal.length} para 950 caracteres.`);
+                respostaFinal = respostaFinal.substring(0, 950) + "...";
+              }
 
               // Grave a mensagem no Firestore
               console.log(`[API Chat] Gravando mensagem no Firestore p/ chat ${chatId}`);
