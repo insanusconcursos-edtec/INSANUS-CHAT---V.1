@@ -311,7 +311,7 @@ export default function CatalogoVendas() {
   );
 }
 
-function ProductCard({ p, onEdit }: { p: ProdutoCatalogo, onEdit: (p: ProdutoCatalogo) => void }) {
+function ProductCard({ p, onEdit }: { p: ProdutoCatalogo, onEdit: (p: ProdutoCatalogo) => void, key?: any }) {
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 flex flex-col relative group">
       <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition">

@@ -325,12 +325,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   saveResult = { status: "erro", message: err.message };
                 }
                 
-                result = await chatSession.sendMessage([{
-                  functionResponse: {
-                    name: "salvar_lead",
-                    response: saveResult
-                  }
-                }]);
+                result = await chatSession.sendMessage({
+                  message: [{
+                    functionResponse: {
+                      name: "salvar_lead",
+                      response: saveResult
+                    }
+                  }]
+                });
               }
             }
 
