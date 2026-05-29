@@ -69,6 +69,7 @@ export async function criarNovoChat(dados: {
   clienteTelefone: string;
   clienteFoto?: string;
   canal: CanalAtendimento;
+  subcanal?: string;
   setorId: string;
   origem: string;
   origemId?: string;

@@ -15,7 +15,8 @@ import {
   Bell,
   Megaphone,
   Terminal,
-  Shield
+  Shield,
+  ShoppingBag
 } from 'lucide-react';
 import { 
   escutarChatsCarteira 
@@ -39,6 +40,7 @@ import TelaLogin from '@/src/components/auth/TelaLogin';
 import PainelCampanhas from '@/src/components/chat/PainelCampanhas';
 import PlaygroundSimulacao from '@/src/components/admin/PlaygroundSimulacao';
 import GerenciamentoEquipe from '@/src/components/admin/GerenciamentoEquipe';
+import CatalogoVendas from '@/src/components/admin/CatalogoVendas';
 
 // Context & Services
 import { AuthProvider, useAuth } from '@/src/context/AuthContext';
@@ -54,12 +56,12 @@ function MainContent() {
   const [filterChannel, setFilterChannel] = useState<{ type: 'all' | 'whatsapp' | 'instagram'; brand?: string }>({ type: 'all' });
   const [lembretesPop, setLembretesPop] = useState<any[]>([]);
   const [showAgenda, setShowAgenda] = useState(false);
-  const [activeView, setActiveView] = useState<'chat' | 'campaigns' | 'playground' | 'team'>('chat');
+  const [activeView, setActiveView] = useState<'chat' | 'campaigns' | 'playground' | 'team' | 'catalog'>('chat');
 
   useEffect(() => {
     // Segurança Adicional: Se um agente estiver em uma visão restrita, volta para o chat
     if (userData && userData.papel !== 'admin') {
-      if (['playground', 'team'].includes(activeView)) {
+      if (['playground', 'team', 'catalog'].includes(activeView)) {
         setActiveView('chat');
       }
     }
@@ -113,7 +115,27 @@ function MainContent() {
       
       // Filtro por Marca (Instagram)
       if (filterChannel.type === 'instagram' && filterChannel.brand) {
-        list = list.filter(c => c.origemId === filterChannel.brand);
+        let expectedSubcanal = '';
+        if (filterChannel.brand === 'insanus') expectedSubcanal = 'IG_INSANUS';
+        else if (filterChannel.brand === 'gabarito') expectedSubcanal = 'IG_GABARITO';
+        else if (filterChannel.brand === 'enem') expectedSubcanal = 'IG_ENEM';
+        
+        list = list.filter(c => {
+          if (c.subcanal === expectedSubcanal) return true;
+          
+          // Fallback para conversas antigas onde 'subcanal' pode não existir ou ser genérico
+          if (c.origemId) {
+             const isInsanus = ['17841448523782454', import.meta.env.VITE_META_PAGE_ID_INSANUS, import.meta.env.VITE_META_INSTAGRAM_ID_INSANUS].includes(c.origemId);
+             const isGabarito = [import.meta.env.VITE_META_PAGE_ID_GABARITO, import.meta.env.VITE_META_INSTAGRAM_ID_GABARITO].includes(c.origemId);
+             const isEnem = [import.meta.env.VITE_META_PAGE_ID_ENEM, import.meta.env.VITE_META_INSTAGRAM_ID_ENEM].includes(c.origemId);
+             
+             if (expectedSubcanal === 'IG_INSANUS' && isInsanus) return true;
+             if (expectedSubcanal === 'IG_GABARITO' && isGabarito) return true;
+             if (expectedSubcanal === 'IG_ENEM' && isEnem) return true;
+          }
+          
+          return false;
+        });
       }
     }
     
@@ -203,6 +225,12 @@ function MainContent() {
         {userData?.papel === 'admin' && (
           <>
             <MainNavItem 
+              active={activeView === 'catalog'} 
+              onClick={() => { setActiveView('catalog'); setShowAgenda(false); }}
+            >
+              <ShoppingBag size={20} />
+            </MainNavItem>
+            <MainNavItem 
               active={activeView === 'playground'} 
               onClick={() => { setActiveView('playground'); setShowAgenda(false); }}
             >
@@ -233,6 +261,10 @@ function MainContent() {
       {activeView === 'campaigns' ? (
         <section className="flex-1 bg-white">
           <PainelCampanhas />
+        </section>
+      ) : activeView === 'catalog' ? (
+        <section className="flex-1 bg-slate-50 overflow-y-auto">
+          <CatalogoVendas />
         </section>
       ) : activeView === 'playground' ? (
         <section className="flex-1 bg-slate-50 overflow-y-auto">

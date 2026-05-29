@@ -72,14 +72,14 @@ export default function ListaDeConversas({
                 <h3 className={`text-sm font-black truncate tracking-tight ${selectedChatId === chat.id ? 'text-indigo-900' : 'text-slate-800'}`}>
                   {chat.clienteNome}
                 </h3>
-                {chat.canal === 'instagram' && chat.origemId && (
+                {chat.subcanal && (
                   <span className={`text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded w-fit ${
-                    chat.origemId === 'insanus' ? 'bg-indigo-50 text-indigo-500' :
-                    chat.origemId === 'gabarito' ? 'bg-emerald-50 text-emerald-500' :
-                    chat.origemId === 'enem' ? 'bg-pink-50 text-pink-500' :
+                    chat.subcanal === 'IG_INSANUS' || chat.subcanal === 'WA_INSANUS' ? 'bg-indigo-50 text-indigo-500' :
+                    chat.subcanal === 'IG_GABARITO' ? 'bg-emerald-50 text-emerald-500' :
+                    chat.subcanal === 'IG_ENEM' ? 'bg-pink-50 text-pink-500' :
                     'bg-slate-50 text-slate-500'
                   }`}>
-                    {chat.origemId}
+                    {chat.subcanal.replace('IG_', 'IG: ').replace('WA_', 'WA: ')}
                   </span>
                 )}
               </div>

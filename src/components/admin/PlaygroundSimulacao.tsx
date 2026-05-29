@@ -22,6 +22,7 @@ export default function PlaygroundSimulacao() {
   const [telefone, setTelefone] = useState('55119' + Math.floor(10000000 + Math.random() * 90000000));
   const [mensagem, setMensagem] = useState('');
   const [canal, setCanal] = useState<'whatsapp' | 'instagram'>('whatsapp');
+  const [subcanalSimulado, setSubcanalSimulado] = useState('17841448523782454');
   const [carregando, setCarregando] = useState(false);
   const [status, setStatus] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -54,8 +55,10 @@ export default function PlaygroundSimulacao() {
       } : {
         object: "instagram",
         entry: [{
+          id: subcanalSimulado,
           messaging: [{
             sender: { id: telefone },
+            recipient: { id: subcanalSimulado },
             message: { text: mensagem }
           }]
         }]
@@ -145,6 +148,22 @@ export default function PlaygroundSimulacao() {
                 </button>
               </div>
             </div>
+
+            {canal === 'instagram' && (
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Subcanal (Marca)</label>
+                <select 
+                  className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-800 focus:bg-white outline-none transition-all"
+                  value={subcanalSimulado}
+                  onChange={(e) => setSubcanalSimulado(e.target.value)}
+                  id="subcanal-selector"
+                >
+                  <option value={typeof process !== 'undefined' && process.env['META_PAGE_ID_INSANUS'] ? process.env['META_PAGE_ID_INSANUS'] : '17841448523782454'}>Insanus (Default)</option>
+                  <option value={typeof process !== 'undefined' && process.env['META_PAGE_ID_GABARITO'] ? process.env['META_PAGE_ID_GABARITO'] : 'GABARITO_ID'}>Gabarito</option>
+                  <option value={typeof process !== 'undefined' && process.env['META_PAGE_ID_ENEM'] ? process.env['META_PAGE_ID_ENEM'] : 'ENEM_ID'}>ENEM</option>
+                </select>
+              </div>
+            )}
 
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Mensagem do Cliente</label>

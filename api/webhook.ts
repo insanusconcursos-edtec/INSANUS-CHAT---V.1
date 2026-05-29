@@ -123,7 +123,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               
               console.log(`[Instagram] Processando mensagem de ${senderId} síncronamente...`);
 
-              await processarEventoInstagram(senderId, texto, pageId, token).catch(e => 
+              await processarEventoInstagram(senderId, texto, pageId, token, recipientId).catch(e => 
                 console.error("[Instagram Error]:", e)
               );
             }
@@ -136,7 +136,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // --- ROTA: API CHAT (GEMINI) ---
       if (path.includes('/api/chat')) {
         const { GoogleGenAI } = await import("@google/genai");
-        const { mid, texto, historico, sistemaPrompt, chatId } = body;
+        const { SYSTEM_PROMPT_VENDAS } = await import("../src/lib/firebase/iaPromptVendas.js");
+        const { mid, texto, historico, chatId } = body;
+        const sistemaPromptOverride = SYSTEM_PROMPT_VENDAS;
 
         // 1. Verificação Atômica no Firestore (Idempotência Baseada no mid)
         if (mid) {
@@ -224,19 +226,138 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               parts: [{ text: msg.texto || "Oi" }]
             }));
 
+            // Buscar catalogo de vendas
+            let catalogoTexto = "";
+            try {
+              const { collection, getDocs, arrayUnion } = await import("firebase/firestore");
+              const { db } = await import("../src/lib/firebase/config.js");
+              const catalogoSnap = await getDocs(collection(db, 'catalogo_vendas'));
+              let itens: any[] = [];
+              catalogoSnap.forEach(doc => {
+                itens.push({ id: doc.id, ...doc.data() });
+              });
+              
+              if (itens.length > 0) {
+                catalogoTexto = "\n\nCATÁLOGO DE PRODUTOS DISPONÍVEIS:\n" + itens.map(i => {
+                  let metaFields = `Modalidade: ${i.modalidade} | Status: ${i.status}`;
+                  if (i.modalidade === 'ONLINE' && i.categoria_online) {
+                    metaFields += ` | Categoria: ${i.categoria_online}`;
+                  }
+                  if (i.modalidade === 'PRESENCIAL' && i.localidade_presencial) {
+                    metaFields += ` | Localidade: ${i.localidade_presencial}`;
+                    if (i.data_inicio) metaFields += ` | Data de Início: ${i.data_inicio}`;
+                    if (i.quantidade_encontros) metaFields += ` | Aulas/Encontros: ${i.quantidade_encontros}`;
+                    if (i.valor_ancoragem) metaFields += ` | Valor Base: R$ ${i.valor_ancoragem}`;
+                    if (i.valor_desconto_credito) metaFields += ` | Desconto Crédito: R$ ${i.valor_desconto_credito}`;
+                    if (i.valor_desconto_pix) metaFields += ` | Desconto PIX: R$ ${i.valor_desconto_pix}`;
+                  }
+                  return `- ID: ${i.id} | Nome: ${i.nome} | ${metaFields}\n  Pitch: ${i.pitch}\n  Link Checkout: ${i.checkout || 'Nenhum'}${i.url ? `\n  Página de Vendas: ${i.url}` : ''}`;
+                }).join("\n\n");
+
+                catalogoTexto += "\n\nREGRAS DO CATÁLOGO E SEGMENTAÇÃO:\n";
+                catalogoTexto += "1. Se um aluno perguntar por turmas presenciais e mencionar uma região (ex: Rondônia/Porto Velho ou Acre/Rio Branco), você DEVE buscar e oferecer APENAS os produtos com a respectiva 'Localidade'. Não ofereça turmas de outro estado.\n";
+                catalogoTexto += "2. Se o cliente perguntar por um produto com Status 'EM PRODUÇÃO', responda de forma extremamente acolhedora e vendedora, gerando antecipação. NÃO envie link de checkout para este produto.\n";
+                catalogoTexto += "3. Quando identificar interesse claro em um produto 'EM PRODUÇÃO', você DEVE adicionar ao final da sua resposta a tag exata: [TAG:interesse_ID_DO_PRODUTO] (onde ID_DO_PRODUTO é o ID real do catálogo).\n";
+              } else {
+                catalogoTexto = "\n\nCATÁLOGO DE PRODUTOS DISPONÍVEIS: ATENÇÃO! O catálogo está vazio neste momento. Temos zero produtos, turmas ou mentorias ativas.";
+              }
+            } catch (catErr) {
+              console.error("Erro ao buscar catalogo no webhook:", catErr);
+              catalogoTexto = "\n\nCATÁLOGO DE PRODUTOS DISPONÍVEIS: ATENÇÃO! O catálogo está vazio ou inacessível. Temos zero produtos, turmas ou mentorias ativas.";
+            }
+
             console.log(`[API Chat] A iniciar chat Gemini para ${chatId || 'unknown'}. Histórico: ${googleHistory.length} msgs.`);
             
             // Reforço de instrução de tamanho e formatação no prompt
-            const promptInstrucao = `${sistemaPrompt}\n\nATENÇÃO: Sua resposta DEVE ser curta, direta e ter no máximo 700 caracteres, pois o canal do Instagram rejeita mensagens longas. Nunca ultrapasse este limite.\n\nIMPORTANTE: Gere o texto EXCLUSIVAMENTE em plain text (texto puro). NÃO utilize formatação Markdown, NÃO coloque palavras em negrito com asteriscos (**), NÃO use itálico ou listas formatadas.`;
+            const promptInstrucao = `${sistemaPromptOverride}${catalogoTexto}\n\nATENÇÃO: Sua resposta DEVE ser curta, direta e ter no máximo 700 caracteres, pois o canal do Instagram rejeita mensagens longas. Nunca ultrapasse este limite.\n\nIMPORTANTE: Gere o texto EXCLUSIVAMENTE em plain text (texto puro). NÃO utilize formatação Markdown, NÃO coloque palavras em negrito com asteriscos (**), NÃO use itálico ou listas formatadas. Seu texto final DEVE ser curto e direto para caber em mensagens de Instagram Direct.`;
+
+            const { Type } = await import("@google/genai");
+
+            const toolDeclaration = {
+              functionDeclarations: [
+                {
+                  name: "salvar_lead",
+                  description: "Registra os dados de contato do lead na lista de espera VIP de um curso que está com status 'EM PRODUÇÃO'.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      nome: { type: Type.STRING, description: "Nome completo do lead" },
+                      email: { type: Type.STRING, description: "E-mail do lead" },
+                      whatsapp: { type: Type.STRING, description: "WhatsApp/Contato com DDD" },
+                      produtoId: { type: Type.STRING, description: "ID do produto em desenvolvimento" }
+                    },
+                    required: ["nome", "email", "whatsapp", "produtoId"]
+                  }
+                }
+              ]
+            };
 
             const chatSession = ai.chats.create({
               model: "gemini-3.5-flash", 
-              config: { systemInstruction: promptInstrucao },
+              config: { 
+                systemInstruction: promptInstrucao,
+                temperature: 0.1,
+                tools: [toolDeclaration]
+              },
               history: googleHistory
             });
 
-            const result = await chatSession.sendMessage({ message: texto });
-            const textoGerado = result.text || "";
+            let result = await chatSession.sendMessage({ message: texto });
+            
+            if (result.functionCalls && result.functionCalls.length > 0) {
+              const call = result.functionCalls[0];
+              if (call.name === 'salvar_lead') {
+                const args = call.args as any;
+                console.log(`[FUNCTION CALL] Executando salvar_lead para ${args.nome}...`);
+                let saveResult;
+                try {
+                  const { addDoc, collection } = await import("firebase/firestore");
+                  const { db } = await import("../src/lib/firebase/config.js");
+                  await addDoc(collection(db, `catalogo_vendas/${args.produtoId}/leads_espera`), {
+                    nome: args.nome,
+                    email: args.email,
+                    whatsapp: args.whatsapp,
+                    status_notificacao: 'pendente',
+                    timestamp: new Date().toISOString()
+                  });
+                  saveResult = { status: "sucesso", message: "Lead registrado com sucesso." };
+                } catch(err: any) {
+                  saveResult = { status: "erro", message: err.message };
+                }
+                
+                result = await chatSession.sendMessage([{
+                  functionResponse: {
+                    name: "salvar_lead",
+                    response: saveResult
+                  }
+                }]);
+              }
+            }
+
+            let textoGerado = result.text || "";
+            
+            // Processa Tags ocultas
+            const tagRegex = /\[TAG:(.*?)\]/g;
+            let tagsEncontradas: string[] = [];
+            let match;
+            while ((match = tagRegex.exec(textoGerado)) !== null) {
+              tagsEncontradas.push(match[1]);
+            }
+            textoGerado = textoGerado.replace(tagRegex, '').trim();
+
+            if (tagsEncontradas.length > 0 && chatId) {
+              try {
+                const { doc, updateDoc, arrayUnion } = await import("firebase/firestore");
+                const { db } = await import("../src/lib/firebase/config.js");
+                await updateDoc(doc(db, 'chats', chatId), {
+                  tags: arrayUnion(...tagsEncontradas)
+                });
+                console.log(`[API Chat] Tags adicionadas ao chat ${chatId}:`, tagsEncontradas);
+              } catch (tagErr) {
+                console.error("Erro ao salvar tags", tagErr);
+              }
+            }
+
             // Filtro de sanitização: remove asteriscos para evitar negritos no Instagram
             respostaFinal = textoGerado.replace(/\*/g, '');
 
@@ -412,7 +533,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 async function processarEventoWhatsApp(contato: string, texto: string, nomeCliente: string, phoneId: string | undefined, token: string | undefined) {
   try {
     const { buscarChatPorContato, salvarMensagem, criarNovoChat } = await import("../src/lib/firebase/services.js");
-    
+    const { doc, updateDoc, serverTimestamp } = await import("firebase/firestore");
+    const { db } = await import("../src/lib/firebase/config.js");
+
+    let subcanal = "WA_INSANUS";
+
     console.log(`[WhatsApp Debug] Buscando chat para contato: ${contato}`);
     let chat = await buscarChatPorContato(contato, 'whatsapp');
     let chatId = chat?.id;
@@ -423,11 +548,23 @@ async function processarEventoWhatsApp(contato: string, texto: string, nomeClien
         clienteNome: nomeCliente,
         clienteTelefone: contato,
         canal: 'whatsapp',
+        subcanal: subcanal,
         setorId: 'triagem-id',
         origem: 'Portal Meta',
         origemId: phoneId // Guardamos o ID do canal para resposta posterior
       });
       console.log(`[WhatsApp Debug] Novo chat criado. ID: ${chatId}`);
+    } else {
+      console.log(`[WhatsApp Debug] c) Atualizando dados do cliente/canal...`);
+      try {
+        await updateDoc(doc(db, 'chats', chatId), {
+          clienteNome: nomeCliente,
+          canal: 'whatsapp',
+          subcanal: subcanal
+        });
+      } catch (e) {
+        console.warn(`[WhatsApp Debug] Falha ao atualizar dados:`, e);
+      }
     }
 
     if (chatId) {
@@ -435,8 +572,6 @@ async function processarEventoWhatsApp(contato: string, texto: string, nomeClien
       await salvarMensagem(chatId, 'cliente', texto);
       
       // Forçar status 'novo' para destravar a IA
-      const { doc, updateDoc, serverTimestamp } = await import("firebase/firestore");
-      const { db } = await import("../src/lib/firebase/config.js");
       await updateDoc(doc(db, 'chats', chatId), {
         iaStatus: 'novo',
         updatedAt: serverTimestamp()
@@ -453,7 +588,7 @@ async function processarEventoWhatsApp(contato: string, texto: string, nomeClien
   }
 }
 
-async function processarEventoInstagram(senderId: string, texto: string, pageId: string | undefined, token: string | undefined) {
+async function processarEventoInstagram(senderId: string, texto: string, pageId: string | undefined, token: string | undefined, recipientId?: string) {
   try {
     const { buscarChatPorContato, salvarMensagem, criarNovoChat } = await import("../src/lib/firebase/services.js");
     const { doc, updateDoc, serverTimestamp } = await import("firebase/firestore");
@@ -464,6 +599,27 @@ async function processarEventoInstagram(senderId: string, texto: string, pageId:
     // d) fetch na Graph API (Perfil)
     let nomeCliente = `IG User ${senderId.slice(-4)}`;
     let fotoCliente = '';
+
+    let subcanal = "IG_GENERIC";
+    try {
+      const getEnv = (key: string) => {
+        if (typeof process !== 'undefined' && process.env && process.env[key]) return process.env[key] as string;
+        try { if (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env[key]) return (import.meta as any).env[key]; } catch(e){}
+        return '';
+      };
+      const pageOrRecipient = pageId || recipientId;
+      const idInsanus = [getEnv('META_INSTAGRAM_ID_INSANUS'), '17841448523782454'];
+      const idGabarito = [getEnv('META_INSTAGRAM_ID_GABARITO')];
+      const idEnem = [getEnv('META_INSTAGRAM_ID_ENEM')];
+
+      if (pageOrRecipient && idInsanus.includes(pageOrRecipient)) subcanal = 'IG_INSANUS';
+      else if (pageOrRecipient && idGabarito.includes(pageOrRecipient)) subcanal = 'IG_GABARITO';
+      else if (pageOrRecipient && idEnem.includes(pageOrRecipient)) subcanal = 'IG_ENEM';
+      
+      if (subcanal === 'IG_GENERIC' && pageOrRecipient) {
+        console.warn(`ALERTA: ID da Meta não mapeado no .env -> [${pageOrRecipient}]`);
+      }
+    } catch(e) {}
 
     if (token) {
       try {
@@ -501,18 +657,21 @@ async function processarEventoInstagram(senderId: string, texto: string, pageId:
         clienteNome: nomeCliente,
         clienteTelefone: senderId,
         canal: 'instagram',
+        subcanal: subcanal,
         setorId: 'triagem-id',
         origem: 'IG Direct',
         origemId: pageId, 
         clienteFoto: fotoCliente
       });
       console.log(`[Instagram Debug] Novo chat criado: ${chatId}`);
-    } else if (nomeCliente !== chat.clienteNome && !nomeCliente.startsWith('IG User')) {
-      console.log(`[Instagram Debug] c) Atualizando dados do cliente...`);
+    } else {
+      console.log(`[Instagram Debug] c) Atualizando dados do cliente/canal...`);
       try {
         await updateDoc(doc(db, 'chats', chatId), {
           clienteNome: nomeCliente,
-          clienteFoto: fotoCliente
+          clienteFoto: fotoCliente,
+          canal: 'instagram', // reforsar caso nulo
+          subcanal: subcanal
         });
         console.log(`[Instagram Debug] Firebase atualizado para: ${nomeCliente}`);
       } catch (e) {
