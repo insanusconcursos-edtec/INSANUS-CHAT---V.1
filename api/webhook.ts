@@ -414,7 +414,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 try {
                   const pageId = chatData.origemId;
                   const senderId = chatData.clienteTelefone;
-                  const token = getMetaToken(pageId); // Page Access Token
+                  
+                  // Mapeamento dinâmico de token baseado no subcanal conforme solicitado
+                  let token = '';
+                  const subcanalChat = chatData.subcanal;
+                  
+                  if (subcanalChat) {
+                    switch (subcanalChat) {
+                      case 'IG_INSANUS':
+                        token = getEnv('META_PAGE_TOKEN_INSANUS') || getEnv('META_TOKEN_INSANUS') || '';
+                        break;
+                      case 'IG_GABARITO':
+                        token = getEnv('META_PAGE_TOKEN_GABARITO') || getEnv('META_TOKEN_GABARITO') || '';
+                        break;
+                      case 'IG_ENEM':
+                        token = getEnv('META_PAGE_TOKEN_ENEM') || getEnv('META_TOKEN_ENEM') || '';
+                        break;
+                      default:
+                        token = getEnv('META_PAGE_TOKEN_INSANUS') || getEnv('META_TOKEN_INSANUS') || ''; // Fallback seguro
+                    }
+                  }
+                  
+                  if (!token) {
+                    token = getMetaToken(pageId); // Fallback pelo ID caso subcanal não esteja setado
+                  }
 
                   if (token) {
                     console.log("[API Chat] Enviando outbound Meta...");
@@ -609,17 +632,26 @@ async function processarEventoInstagram(senderId: string, texto: string, pageId:
         try { if (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env[key]) return (import.meta as any).env[key]; } catch(e){}
         return '';
       };
-      const pageOrRecipient = pageId || recipientId;
-      const idInsanus = [getEnv('META_INSTAGRAM_ID_INSANUS'), '17841448523782454'];
-      const idGabarito = [getEnv('META_INSTAGRAM_ID_GABARITO')];
-      const idEnem = [getEnv('META_INSTAGRAM_ID_ENEM')];
-
-      if (pageOrRecipient && idInsanus.includes(pageOrRecipient)) subcanal = 'IG_INSANUS';
-      else if (pageOrRecipient && idGabarito.includes(pageOrRecipient)) subcanal = 'IG_GABARITO';
-      else if (pageOrRecipient && idEnem.includes(pageOrRecipient)) subcanal = 'IG_ENEM';
       
-      if (subcanal === 'IG_GENERIC' && pageOrRecipient) {
-        console.warn(`ALERTA: ID da Meta não mapeado no .env -> [${pageOrRecipient}]`);
+      const idsInsanus = [getEnv('META_INSTAGRAM_ID_INSANUS'), '17841448523782454', getEnv('META_PAGE_ID_INSANUS')].filter(Boolean);
+      const idsGabarito = [getEnv('META_INSTAGRAM_ID_GABARITO'), getEnv('META_PAGE_ID_GABARITO')].filter(Boolean);
+      const idsEnem = [getEnv('META_INSTAGRAM_ID_ENEM'), getEnv('META_PAGE_ID_ENEM')].filter(Boolean);
+
+      const checkId = (id: string | undefined): string | null => {
+        if (!id) return null;
+        if (idsInsanus.includes(id)) return 'IG_INSANUS';
+        if (idsGabarito.includes(id)) return 'IG_GABARITO';
+        if (idsEnem.includes(id)) return 'IG_ENEM';
+        return null;
+      };
+
+      const resolvedSubcanal = checkId(recipientId) || checkId(pageId);
+      if (resolvedSubcanal) {
+        subcanal = resolvedSubcanal;
+      }
+
+      if (subcanal === 'IG_GENERIC') {
+        console.warn(`ALERTA: ID da Meta não mapeado no .env -> Recipient: [${recipientId}], Page: [${pageId}]`);
       }
     } catch(e) {}
 

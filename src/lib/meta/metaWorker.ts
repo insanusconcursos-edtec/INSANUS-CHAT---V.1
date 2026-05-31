@@ -64,7 +64,8 @@ async function processarUltimaMensagemSaida(chatId: string, chatData: any) {
            chatData.clienteTelefone, 
            msg.texto, 
            chatData.canal,
-           chatData.origemId
+           chatData.origemId,
+           chatData.subcanal
         );
 
         if (result && (result.messages?.[0]?.id || result.message_id)) {

@@ -124,7 +124,10 @@ async function processarRespostaIA(chatId: string) {
 
     console.log(`[IA Worker] Agente Virtual preparando resposta para chat ${chatId}...`);
     
-    // Bucar histórico para contexto
+    // Adiciona trava no banco antes de prosseguir
+    await updateDoc(chatRef, { iaStatus: 'processando' });
+    
+    // Buscar histórico para contexto
     const q = query(
       collection(db, 'chats', chatId, 'mensagens'),
       orderBy('timestamp', 'desc'),

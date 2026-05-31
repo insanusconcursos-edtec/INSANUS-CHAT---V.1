@@ -72,8 +72,29 @@ export async function enviarMensagemWhatsApp(to: string, text: string, phoneId?:
 /**
  * Envia uma mensagem via Instagram Graph API
  */
-export async function enviarMensagemInstagram(recipientId: string, text: string, igAccountId?: string) {
-  const token = getMetaToken(igAccountId);
+export async function enviarMensagemInstagram(recipientId: string, text: string, igAccountId?: string, subcanal?: string) {
+  let token = '';
+  
+  if (subcanal) {
+    switch (subcanal) {
+      case 'IG_INSANUS':
+        token = process.env.META_PAGE_TOKEN_INSANUS || process.env.META_TOKEN_INSANUS || '';
+        break;
+      case 'IG_GABARITO':
+        token = process.env.META_PAGE_TOKEN_GABARITO || process.env.META_TOKEN_GABARITO || '';
+        break;
+      case 'IG_ENEM':
+        token = process.env.META_PAGE_TOKEN_ENEM || process.env.META_TOKEN_ENEM || '';
+        break;
+      default:
+        token = process.env.META_PAGE_TOKEN_INSANUS || process.env.META_TOKEN_INSANUS || ''; // Fallback seguro
+    }
+  }
+
+  if (!token) {
+    token = getMetaToken(igAccountId);
+  }
+
   // Se igAccountId não for provido, tenta usar 'me' (comportamento antigo) ou fallback
   const accountId = igAccountId || 'me';
 
@@ -82,8 +103,7 @@ export async function enviarMensagemInstagram(recipientId: string, text: string,
     return null;
   }
 
-  // Ajustado para v21.0 (ou v25.0 conforme solicitado, usando a mais estável disponível no momento do SDK se possível)
-  // O usuário pediu especificamente v25.0
+  // Ajustado para v25.0 conforme solicitado
   const url = `https://graph.facebook.com/v25.0/${accountId}/messages`;
 
   try {
@@ -116,14 +136,14 @@ export async function enviarMensagemInstagram(recipientId: string, text: string,
 /**
  * Função genérica para despachar mensagens baseada no canal
  */
-export async function enviarMensagemPeloCanal(contato: string, texto: string, canal: 'whatsapp' | 'instagram' | 'telegram' | 'web', origemId?: string) {
-  console.log(`[Meta API] Despachando via ${canal} para ${contato} (Origem: ${origemId})`);
+export async function enviarMensagemPeloCanal(contato: string, texto: string, canal: 'whatsapp' | 'instagram' | 'telegram' | 'web', origemId?: string, subcanal?: string) {
+  console.log(`[Meta API] Despachando via ${canal} para ${contato} (Origem: ${origemId}, Subcanal: ${subcanal})`);
   
   switch (canal) {
     case 'whatsapp':
       return await enviarMensagemWhatsApp(contato, texto, origemId);
     case 'instagram':
-      return await enviarMensagemInstagram(contato, texto, origemId);
+      return await enviarMensagemInstagram(contato, texto, origemId, subcanal);
     default:
       console.log(`[Meta API] Canal ${canal} não requer API da Meta ou não suportado.`);
       return { status: 'ignored' };

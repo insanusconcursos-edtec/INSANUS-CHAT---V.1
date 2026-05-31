@@ -20,6 +20,8 @@ export default function ListaDeConversas({
   onSelectChat,
   isLoading 
 }: ListaDeConversasProps) {
+  const [brokenImages, setBrokenImages] = React.useState<Record<string, boolean>>({});
+
   if (isLoading) {
     return (
       <div className="flex-1 flex items-center justify-center p-8">
@@ -54,17 +56,29 @@ export default function ListaDeConversas({
           )}
           
           <div className="relative shrink-0">
-            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-xs shadow-sm transition-transform group-hover:scale-105 ${
-              selectedChatId === chat.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500'
-            }`}>
-              {chat.clienteNome.substring(0, 2).toUpperCase()}
+            {chat.clienteFoto && !brokenImages[chat.id] ? (
+                <img
+                  src={chat.clienteFoto}
+                  alt={chat.clienteNome}
+                  referrerPolicy="no-referrer"
+                  className="w-12 h-12 rounded-2xl object-cover shadow-sm transition-transform group-hover:scale-105"
+                  onError={() => {
+                    setBrokenImages(prev => ({ ...prev, [chat.id]: true }));
+                  }}
+                />
+              ) : (
+                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-xs shadow-sm transition-transform group-hover:scale-105 ${
+                  selectedChatId === chat.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500'
+                }`}>
+                  {chat.clienteNome.substring(0, 2).toUpperCase()}
+                </div>
+              )}
+              <div className="absolute -bottom-1 -right-1 bg-white p-1 rounded-lg shadow-sm border border-slate-100">
+                 {chat.canal === 'whatsapp' && <MessageCircle size={10} className="text-emerald-500" />}
+                 {chat.canal === 'instagram' && <Instagram size={10} className="text-pink-500" />}
+                 {chat.canal === 'site' && <Globe size={10} className="text-blue-500" />}
+              </div>
             </div>
-            <div className="absolute -bottom-1 -right-1 bg-white p-1 rounded-lg shadow-sm border border-slate-100">
-               {chat.canal === 'whatsapp' && <MessageCircle size={10} className="text-emerald-500" />}
-               {chat.canal === 'instagram' && <Instagram size={10} className="text-pink-500" />}
-               {chat.canal === 'site' && <Globe size={10} className="text-blue-500" />}
-            </div>
-          </div>
 
           <div className="flex-1 min-w-0">
             <div className="flex justify-between items-start mb-1">

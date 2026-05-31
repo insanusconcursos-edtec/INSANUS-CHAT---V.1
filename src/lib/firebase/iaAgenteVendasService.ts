@@ -7,6 +7,7 @@ import { doc, updateDoc, serverTimestamp, collection, addDoc } from 'firebase/fi
 import { db } from './config.js';
 import { handleFirestoreError, OperationType } from './errors.js';
 import { SYSTEM_PROMPT_VENDAS } from './iaPromptVendas.js';
+import { salvarMensagem } from './services.js';
 import type { Mensagem } from '@/src/types';
 
 /**
@@ -34,9 +35,13 @@ export async function gerarRespostaVendedorVirtual(chatId: string, historico: Me
 
     const { resposta } = await response.json();
 
-    // 3. Atualiza metadados do chat (A mensagem já foi salva pelo próprio endpoint /api/chat)
+    // 3. Grava a mensagem gerada no Firestore (isso limpa o semRespostaDesde!)
+    await salvarMensagem(chatId, 'ia', resposta);
+
+    // 4. Atualiza metadados do chat
     await updateDoc(chatRef, {
       statusEtapa: 'negociacao', // IA assume que iniciou a negociação
+      iaStatus: 'concluido', // Libera o status 'processando'
       updatedAt: serverTimestamp()
     });
 

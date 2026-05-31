@@ -33,7 +33,12 @@ export default function VisualizadorChat({ chat, currentUserId, isAdmin }: Visua
   const [mensagens, setMensagens] = useState<Mensagem[]>([]);
   const [novaMensagem, setNovaMensagem] = useState('');
   const [sugestaoIa, setSugestaoIa] = useState<{ texto: string; acao: string } | null>(null);
+  const [avatarBroken, setAvatarBroken] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setAvatarBroken(false);
+  }, [chat.id]);
 
   const isAguardandoMinhaConfirmacao = chat.status === 'aguardando_confirmacao' && chat.atendenteId === currentUserId;
   const emFailoverIA = chat.responsabilidade === 'ia' && chat.avisoFailover;
@@ -187,10 +192,25 @@ export default function VisualizadorChat({ chat, currentUserId, isAdmin }: Visua
       {/* Header */}
       <header className="h-16 bg-white border-b border-slate-200 px-8 flex items-center justify-between sticky top-0 z-10 shadow-sm">
         <div className="flex items-center gap-3">
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-white shadow-lg ${
-             chat.atendenteId ? 'bg-indigo-600' : 'bg-emerald-500'
-          }`}>
-            {chat.atendenteId ? <User size={20} /> : <Bot size={20} />}
+          <div className="relative shrink-0 w-10 h-10">
+            {chat.clienteFoto && !avatarBroken ? (
+              <img
+                src={chat.clienteFoto}
+                alt={chat.clienteNome}
+                referrerPolicy="no-referrer"
+                className="w-10 h-10 rounded-xl object-cover shadow-md"
+                onError={() => setAvatarBroken(true)}
+              />
+            ) : (
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-xs text-white shadow-md ${
+                chat.atendenteId ? 'bg-indigo-600' : 'bg-emerald-500'
+              }`}>
+                {chat.clienteNome.substring(0, 2).toUpperCase()}
+              </div>
+            )}
+            <div className="absolute -bottom-1 -right-1 bg-white p-0.5 rounded-md shadow-sm border border-slate-100 flex items-center justify-center">
+              {chat.atendenteId ? <User size={10} className="text-indigo-600" /> : <Bot size={10} className="text-emerald-500" />}
+            </div>
           </div>
           <div>
             <h2 className="text-sm font-black text-slate-800 tracking-tight">{chat.clienteNome}</h2>
